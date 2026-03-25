@@ -1,0 +1,703 @@
+"""
+Simple Causal Tracing via Activation Patching
+
+This script performs activation patching for user-specified truncation indices:
+1. Build source/base prompt pairs using the same format_id pairing logic.
+2. For each truncation token index provided:
+   - Truncate base context at that token position.
+   - Build counterfactual source by replacing mass/KE in base context.
+   - Patch all earlier token positions at each layer.
+   - Score: log P(source_target_first_token) - log P(base_target_first_token)
+   - Generate and save heatmap.
+
+Usage:
+  python intervene_graph.py --target-indices 120 132 145
+  python intervene_graph.py --target-indices 50 --layers 0 5 10 15 20
+
+INPUT PATHS:
+  - Traces metadata: /home/wuroderi/links/scratch/reasoning_traces/Qwen2.5-32B/velocity/traces_metadata.json
+  - Model: /home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Qwen2.5-32B
+
+OUTPUT PATHS:
+  - Heatmaps + data: /home/wuroderi/links/scratch/causal_graph_plots/
+  - Summary JSON: /home/wuroderi/links/scratch/causal_graph_plots/causal_graph_summary.json
+"""
+
+import argparse
+import json
+import re
+from collections import defaultdict
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# ==========================================
+# PATHS
+# ==========================================
+
+MODEL_PATH = "/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Qwen2.5-32B"
+TRACES_DIR = Path("/home/wuroderi/links/scratch/reasoning_traces/Qwen2.5-32B/velocity")
+TRACES_METADATA_FILE = TRACES_DIR / "traces_metadata.json"
+DEFAULT_PAIRS_JSON = TRACES_DIR / "prompt_pairs.json"
+
+OUTPUT_DIR = Path("/home/wuroderi/links/scratch/causal_graph_plots")
+OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ==========================================
+# CLI ARGUMENTS
+# ==========================================
+
+parser = argparse.ArgumentParser(description="Activation patching for specified token indices.")
+parser.add_argument(
+    "--target-indices",
+    type=int,
+    nargs="+",
+    default=[],
+    help="Token indices to truncate at (space-separated). Example: 120 132 145",
+)
+parser.add_argument(
+    "--pairs-json",
+    type=Path,
+    default=DEFAULT_PAIRS_JSON,
+    help="Path to pre-generated prompt pairs JSON.",
+)
+parser.add_argument(
+    "--pair-index",
+    type=int,
+    default=0,
+    help="Which pair to analyze (default: 0, first pair).",
+)
+parser.add_argument(
+    "--n-pairs",
+    type=int,
+    default=1,
+    help="How many pairs to analyze (starting from --pair-index).",
+)
+parser.add_argument(
+    "--layers",
+    type=int,
+    nargs="+",
+    default=None,
+    help="Layer indices to test (default: every 4th layer 0-63). Example: 0 5 10 15",
+)
+parser.add_argument(
+    "--no-plot",
+    action="store_true",
+    help="Skip heatmap visualization (still save .npz data).",
+)
+
+args = parser.parse_args()
+
+# Set defaults
+if args.layers is None:
+    LAYERS_TO_TEST = list(range(0, 64, 4))
+else:
+    LAYERS_TO_TEST = args.layers
+
+TARGET_TOKEN_INDICES: List[int] = args.target_indices or []
+
+print("=" * 80)
+print("SIMPLE CAUSAL TRACING via ACTIVATION PATCHING")
+print("=" * 80)
+print(f"Model: {MODEL_PATH}")
+print(f"Device: {device}")
+print(f"Target token indices: {TARGET_TOKEN_INDICES}")
+print(f"Pair range: {args.pair_index} to {args.pair_index + args.n_pairs - 1}")
+print(f"Layers tested: {LAYERS_TO_TEST}")
+print(f"Output dir: {OUTPUT_DIR}")
+print()
+print("INPUT PATHS:")
+print(f"  Prompt pairs: {args.pairs_json}")
+print(f"  Traces (reference only): {TRACES_METADATA_FILE}")
+print(f"  Model: {MODEL_PATH}")
+print()
+print("OUTPUT PATHS:")
+print(f"  Heatmaps/data: {OUTPUT_DIR}/causal_heatmap_pair_*.png")
+print(f"  NPZ arrays: {OUTPUT_DIR}/causal_data_*.npz")
+print(f"  Summary: {OUTPUT_DIR}/causal_graph_summary.json")
+print("=" * 80)
+print()
+
+
+
+# ==========================================
+# LOAD MODEL
+# ==========================================
+
+print("Loading model...")
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+)
+model.eval()
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+print(f"Model loaded: {model.config.num_hidden_layers} layers")
+print()
+
+# ==========================================
+# LOAD PRE-GENERATED PAIRS
+# ==========================================
+
+print("Loading prompt pairs...")
+with open(args.pairs_json, "r") as f:
+    pair_payload = json.load(f)
+
+if "pairs" not in pair_payload:
+    raise ValueError(f"Invalid pairs JSON (missing 'pairs'): {args.pairs_json}")
+
+prompt_pairs = pair_payload["pairs"]
+
+print(f"Created {len(prompt_pairs)} prompt pairs")
+
+# Select subset based on CLI args
+pair_end = min(args.pair_index + args.n_pairs, len(prompt_pairs))
+selected_pairs = prompt_pairs[args.pair_index : pair_end]
+print(f"Processing pairs {args.pair_index} to {pair_end - 1} ({len(selected_pairs)} pairs)")
+print()
+
+
+def normalize_pair_for_patching(pair: dict):
+    # v5 schema (current): cot_0/cot_1 with trace_0/trace_1 values
+    if "values" in pair and "cot_0" in pair and "cot_1" in pair:
+        trace_0 = {
+            "id": pair.get("pair_id", -1),
+            "format_id": pair.get("format_id", -1),
+            "m": pair["values"]["trace_0"].get("m"),
+            "ke": pair["values"]["trace_0"].get("ke"),
+            "v": pair["values"]["trace_0"].get("v"),
+            "d": pair["values"]["trace_0"].get("d"),
+            "generated_text": pair["cot_0"].get("original", ""),
+        }
+        trace_1 = {
+            "id": pair.get("pair_id", -1),
+            "format_id": pair.get("format_id", -1),
+            "m": pair["values"]["trace_1"].get("m"),
+            "ke": pair["values"]["trace_1"].get("ke"),
+            "v": pair["values"]["trace_1"].get("v"),
+            "d": pair["values"]["trace_1"].get("d"),
+            "generated_text": pair["cot_1"].get("original", ""),
+        }
+        # For v5 schema, return cot_1 merged with trace_0 values as the precomputed counterfactual
+        merged_text = pair["cot_1"].get("with_0_values")
+        return trace_0, trace_1, merged_text
+
+    # v4 schema (old): cot_source/cot_base structure
+    if "values" in pair and "cot_source" in pair and "cot_base" in pair:
+        source_trace = {
+            "id": pair.get("pair_id", -1),
+            "format_id": pair.get("format_id", -1),
+            "m": pair["values"]["source"].get("m"),
+            "ke": pair["values"]["source"].get("ke"),
+            "v": pair["values"]["source"].get("v"),
+            "d": pair["values"]["source"].get("d"),
+            "generated_text": pair["cot_source"].get("original", ""),
+        }
+        base_trace = {
+            "id": pair.get("pair_id", -1),
+            "format_id": pair.get("format_id", -1),
+            "m": pair["values"]["base"].get("m"),
+            "ke": pair["values"]["base"].get("ke"),
+            "v": pair["values"]["base"].get("v"),
+            "d": pair["values"]["base"].get("d"),
+            "generated_text": pair["cot_base"].get("original", ""),
+        }
+        # For v4 schema, return base merged with source values as the precomputed counterfactual
+        merged_text = pair["cot_base"].get("counterfactual_source_values")
+        return source_trace, base_trace, merged_text
+
+    # v3 schema: cot_raw structure
+    if "values" in pair and "cot_raw" in pair:
+        source_trace = {
+            "id": pair["cot_raw"]["source"].get("trace_id"),
+            "format_id": pair.get("format_id", -1),
+            "m": pair["values"]["source"].get("m"),
+            "ke": pair["values"]["source"].get("ke"),
+            "v": pair["values"]["source"].get("v"),
+            "d": pair["values"]["source"].get("d"),
+            "generated_text": pair["cot_raw"]["source"].get("text", ""),
+        }
+        base_trace = {
+            "id": pair["cot_raw"]["base"].get("trace_id"),
+            "format_id": pair.get("format_id", -1),
+            "m": pair["values"]["base"].get("m"),
+            "ke": pair["values"]["base"].get("ke"),
+            "v": pair["values"]["base"].get("v"),
+            "d": pair["values"]["base"].get("d"),
+            "generated_text": pair["cot_raw"]["base"].get("text", ""),
+        }
+        merged_text = pair.get("cot_counterfactual", {}).get("base_with_source_values")
+        return source_trace, base_trace, merged_text
+
+    # v2 schema from intervene_generate_pairs.py
+    if "source" in pair and "base" in pair:
+        source_trace = {
+            "id": pair["source"].get("trace_id"),
+            "format_id": pair.get("format_id", pair["source"].get("format_id")),
+            "m": pair["source"].get("values", {}).get("m"),
+            "ke": pair["source"].get("values", {}).get("ke"),
+            "v": pair["source"].get("values", {}).get("v"),
+            "d": pair["source"].get("values", {}).get("d"),
+            "generated_text": pair["source"].get("generated_text", ""),
+        }
+        base_trace = {
+            "id": pair["base"].get("trace_id"),
+            "format_id": pair.get("format_id", pair["base"].get("format_id")),
+            "m": pair["base"].get("values", {}).get("m"),
+            "ke": pair["base"].get("values", {}).get("ke"),
+            "v": pair["base"].get("values", {}).get("v"),
+            "d": pair["base"].get("values", {}).get("d"),
+            "generated_text": pair["base"].get("generated_text", ""),
+        }
+        merged_text = pair.get("merged_counterfactual", {}).get("generated_text")
+        return source_trace, base_trace, merged_text
+
+    # v1 schema fallback
+    if "source_trace" in pair and "base_trace" in pair:
+        return pair["source_trace"], pair["base_trace"], None
+
+    raise ValueError("Unrecognized pair schema")
+
+# ==========================================
+# HELPERS
+# ==========================================
+
+
+def find_velocity_in_text(text: str, velocity: float) -> Optional[int]:
+    velocity_strs = [
+        str(int(velocity)),
+        f"{velocity:.1f}",
+        f"{velocity:.2f}",
+    ]
+
+    for vel_str in velocity_strs:
+        pattern = rf"\\b{re.escape(vel_str[0])}"
+        match = re.search(pattern, text)
+        if match:
+            remaining = text[match.start() :]
+            if remaining.startswith(vel_str):
+                return match.start()
+    return None
+
+
+def format_value_like_reference(reference: str, value: float) -> str:
+    if "e" in reference.lower():
+        mantissa, _exp = re.split(r"[eE]", reference)
+        decimal_places = len(mantissa.split(".")[1]) if "." in mantissa else 0
+        formatted = f"{value:.{decimal_places}e}"
+        return formatted.upper() if "E" in reference else formatted
+
+    if "." in reference:
+        decimal_places = len(reference.split(".")[1])
+        return f"{value:.{decimal_places}f}"
+
+    return f"{value:.0f}"
+
+
+def find_value_occurrence_in_text(text: str, value: float) -> Optional[Tuple[int, int, str]]:
+    numeric_pattern = re.compile(r"(?<![\\w.])[-+]?(?:\\d+\\.\\d+|\\d+|\\.\\d+)(?:[eE][+-]?\\d+)?(?![\\w.])")
+    for match in numeric_pattern.finditer(text):
+        token = match.group()
+        if format_value_like_reference(token, value) == token:
+            return match.start(), match.end(), token
+    return None
+
+
+def replace_formatted_value_occurrences(
+    text: str,
+    old_value: float,
+    new_value: float,
+    offset: int = 0,
+) -> Tuple[str, List[Tuple[int, int, str, str]]]:
+    numeric_pattern = re.compile(r"(?<![\\w.])[-+]?(?:\\d+\\.\\d+|\\d+|\\.\\d+)(?:[eE][+-]?\\d+)?(?![\\w.])")
+
+    replacements = []
+    result_parts = []
+    last_end = 0
+
+    for match in numeric_pattern.finditer(text):
+        token = match.group()
+        if format_value_like_reference(token, old_value) != token:
+            continue
+
+        replacement = format_value_like_reference(token, new_value)
+        result_parts.append(text[last_end : match.start()])
+        result_parts.append(replacement)
+        replacements.append((offset + match.start(), offset + match.end(), token, replacement))
+        last_end = match.end()
+
+    if not replacements:
+        return text, []
+
+    result_parts.append(text[last_end:])
+    return "".join(result_parts), replacements
+
+
+def replace_all_numeric_occurrences(
+    text: str,
+    old_ke: float,
+    new_ke: float,
+    old_mass: float,
+    new_mass: float,
+) -> Tuple[str, List[Tuple[int, int, str, str]]]:
+    answer_marker = "Answer (step-by-step): "
+    if answer_marker in text:
+        marker_pos = text.find(answer_marker) + len(answer_marker)
+        prompt_part = text[:marker_pos]
+        cot_part = text[marker_pos:]
+    else:
+        prompt_part = text
+        cot_part = ""
+        marker_pos = len(text)
+
+    replacements = []
+
+    old_ke_formats = [
+        f"{old_ke:.3e}",
+        str(int(old_ke)) if old_ke == int(old_ke) else str(old_ke),
+    ]
+    new_ke_formats = [
+        f"{new_ke:.3e}",
+        str(int(new_ke)) if new_ke == int(new_ke) else str(new_ke),
+    ]
+
+    old_v_squared = (2 * old_ke) / old_mass
+    new_v_squared = (2 * new_ke) / new_mass
+
+    old_mass_str = str(int(old_mass))
+    new_mass_str = str(int(new_mass))
+
+    result_prompt = prompt_part
+    for old_fmt, new_fmt in zip(old_ke_formats, new_ke_formats):
+        if old_fmt in result_prompt:
+            start = 0
+            while True:
+                pos = result_prompt.find(old_fmt, start)
+                if pos == -1:
+                    break
+                replacements.append((pos, pos + len(old_fmt), old_fmt, new_fmt))
+                result_prompt = result_prompt[:pos] + new_fmt + result_prompt[pos + len(old_fmt) :]
+                start = pos + len(new_fmt)
+
+    for match in re.finditer(rf"\\b{re.escape(old_mass_str)}\\b", result_prompt):
+        replacements.append((match.start(), match.end(), old_mass_str, new_mass_str))
+    result_prompt = re.sub(rf"\\b{re.escape(old_mass_str)}\\b", new_mass_str, result_prompt)
+
+    result_cot = cot_part
+    cot_offset = marker_pos
+
+    for old_fmt, new_fmt in zip(old_ke_formats, new_ke_formats):
+        if old_fmt in result_cot:
+            start = 0
+            while True:
+                pos = result_cot.find(old_fmt, start)
+                if pos == -1:
+                    break
+                replacements.append((cot_offset + pos, cot_offset + pos + len(old_fmt), old_fmt, new_fmt))
+                result_cot = result_cot[:pos] + new_fmt + result_cot[pos + len(old_fmt) :]
+                start = pos + len(new_fmt)
+
+    for match in re.finditer(rf"\\b{re.escape(old_mass_str)}\\b", result_cot):
+        replacements.append((cot_offset + match.start(), cot_offset + match.end(), old_mass_str, new_mass_str))
+    result_cot = re.sub(rf"\\b{re.escape(old_mass_str)}\\b", new_mass_str, result_cot)
+
+    result_cot, v2_replacements = replace_formatted_value_occurrences(
+        result_cot,
+        old_value=old_v_squared,
+        new_value=new_v_squared,
+        offset=cot_offset,
+    )
+    replacements.extend(v2_replacements)
+
+    return result_prompt + result_cot, replacements
+
+
+def tokenize_with_offsets(text: str):
+    return tokenizer(
+        text,
+        return_tensors="pt",
+        add_special_tokens=True,
+        return_offsets_mapping=True,
+    )
+
+
+def compute_causal_effect(
+    source_text: str,
+    base_text: str,
+    layer: int,
+    token_pos: int,
+    source_target_text: str,
+    base_target_text: str,
+) -> float:
+    source_inputs = tokenizer(source_text, return_tensors="pt").to(model.device)
+    source_input_ids = source_inputs["input_ids"]
+
+    activation_storage = {}
+
+    def source_hook(_module, _inputs, output):
+        hidden_states = output[0] if isinstance(output, tuple) else output
+        if token_pos < hidden_states.shape[1]:
+            activation_storage["activation"] = hidden_states[0, token_pos].detach().cpu()
+
+    handle = model.model.layers[layer].register_forward_hook(source_hook)
+    with torch.no_grad():
+        _ = model(source_input_ids)
+    handle.remove()
+
+    if "activation" not in activation_storage:
+        return 0.0
+
+    source_activation = activation_storage["activation"]
+
+    base_inputs = tokenizer(base_text, return_tensors="pt").to(model.device)
+    base_input_ids = base_inputs["input_ids"]
+
+    def patch_hook(_module, _inputs, output):
+        if isinstance(output, tuple):
+            hidden_states = output[0].clone()
+        else:
+            hidden_states = output.clone()
+
+        if token_pos < hidden_states.shape[1]:
+            hidden_states[0, token_pos] = source_activation.to(hidden_states.device)
+
+        if isinstance(output, tuple):
+            return (hidden_states,) + output[1:]
+        return hidden_states
+
+    handle = model.model.layers[layer].register_forward_hook(patch_hook)
+    with torch.no_grad():
+        outputs = model(base_input_ids)
+        logits = outputs.logits[0, -1, :]
+        log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    handle.remove()
+
+    source_token_ids = tokenizer.encode(source_target_text, add_special_tokens=False)
+    base_token_ids = tokenizer.encode(base_target_text, add_special_tokens=False)
+    if len(source_token_ids) == 0 or len(base_token_ids) == 0:
+        return 0.0
+
+    effect = log_probs[source_token_ids[0]].item() - log_probs[base_token_ids[0]].item()
+
+    del source_input_ids, base_input_ids, source_activation
+    torch.cuda.empty_cache()
+
+    return effect
+
+
+def get_token_texts(input_ids: torch.Tensor) -> List[str]:
+    return [tokenizer.decode([tid.item()]) for tid in input_ids]
+
+
+# ==========================================
+# MAIN LOOP
+# ==========================================
+
+# ==========================================
+# MAIN ANALYSIS LOOP
+# ==========================================
+
+if not TARGET_TOKEN_INDICES:
+    print("ERROR: No target token indices provided!")
+    print("Usage: python intervene_graph.py --target-indices 120 132 145")
+    exit(1)
+
+all_pairs_metadata = []
+
+for pair_idx, pair in enumerate(selected_pairs):
+    source_trace, base_trace, premerged_text = normalize_pair_for_patching(pair)
+
+    print("\n" + "=" * 80)
+    print(f"PAIR {args.pair_index + pair_idx + 1}")
+    print("=" * 80)
+    print(
+        f"Source trace {source_trace['id']} | v={source_trace['v']:.3f}, m={source_trace['m']}, ke={source_trace['ke']:.3e}"
+    )
+    print(
+        f"Base   trace {base_trace['id']} | v={base_trace['v']:.3f}, m={base_trace['m']}, ke={base_trace['ke']:.3e}"
+    )
+    print(f"Target token indices to analyze: {TARGET_TOKEN_INDICES}")
+    print()
+
+    base_full_text = base_trace["generated_text"]
+
+    # Tokenize full text to get offsets for all tokens
+    full_enc = tokenize_with_offsets(base_full_text)
+    full_ids = full_enc["input_ids"][0]
+    full_offsets = full_enc["offset_mapping"][0].tolist()
+    base_token_texts = get_token_texts(full_ids)
+    n_total_tokens = len(full_ids)
+
+    print(f"Full context: {n_total_tokens} tokens")
+    print()
+
+    # Build counterfactual source for full text
+    if premerged_text is not None:
+        source_full_text = premerged_text
+        substitutions = []
+    else:
+        source_full_text, substitutions = replace_all_numeric_occurrences(
+            base_full_text,
+            old_ke=base_trace["ke"],
+            new_ke=source_trace["ke"],
+            old_mass=base_trace["m"],
+            new_mass=source_trace["m"],
+        )
+
+    pair_results = []
+
+    # For each target index, perform patching
+    for target_idx in TARGET_TOKEN_INDICES:
+        if target_idx <= 0 or target_idx >= n_total_tokens:
+            print(f"  WARNING: target_idx {target_idx} out of range [1, {n_total_tokens-1}], skipping")
+            continue
+
+        # Get token at target index
+        target_token_text = base_token_texts[target_idx]
+
+        # Truncate at target position
+        target_char_pos = full_offsets[target_idx][0]
+        if target_char_pos is None:
+            print(f"  WARNING: could not get char offset for token {target_idx}, skipping")
+            continue
+
+        base_prefix = base_full_text[:target_char_pos]
+        source_prefix = source_full_text[:target_char_pos]
+
+        # Tokenize prefix
+        base_prefix_enc = tokenizer(base_prefix, return_tensors="pt", add_special_tokens=True)
+        source_prefix_enc = tokenizer(source_prefix, return_tensors="pt", add_special_tokens=True)
+
+        base_prefix_ids = base_prefix_enc["input_ids"][0]
+        source_prefix_ids = source_prefix_enc["input_ids"][0]
+        n_prefix_tokens = len(base_prefix_ids)
+
+        print(f"  Target index {target_idx} (token: '{target_token_text.strip()}')")
+        print(f"    Prefix tokens: {n_prefix_tokens}")
+
+        if n_prefix_tokens <= 1:
+            print(f"    Skipping: prefix too short")
+            continue
+
+        # Get target token for logprob comparison
+        # The target is the first token at the start of the full-text token
+        source_target_text = base_token_texts[target_idx]  # Simplified: use same for both
+        base_target_text = base_token_texts[target_idx]
+
+        # Compute heatmap by patching all prefix positions
+        heatmap = np.zeros((len(LAYERS_TO_TEST), n_prefix_tokens), dtype=np.float32)
+
+        print(f"    Computing patching effects...")
+        for layer_i, layer in enumerate(LAYERS_TO_TEST):
+            for token_pos in range(n_prefix_tokens):
+                effect = compute_causal_effect(
+                    source_text=source_prefix,
+                    base_text=base_prefix,
+                    layer=layer,
+                    token_pos=token_pos,
+                    source_target_text=source_target_text,
+                    base_target_text=base_target_text,
+                )
+                heatmap[layer_i, token_pos] = effect
+
+        # Get prefix tokens
+        prefix_token_texts = [tokenizer.decode([base_prefix_ids[i].item()]) for i in range(n_prefix_tokens)]
+
+        # Save NPZ
+        npz_file = OUTPUT_DIR / f"causal_data_pair_{args.pair_index + pair_idx + 1:03d}_target_{target_idx:03d}.npz"
+        np.savez(
+            npz_file,
+            heatmap=heatmap,
+            layers=np.array(LAYERS_TO_TEST),
+            prefix_tokens=np.array(prefix_token_texts, dtype=object),
+            target_index=target_idx,
+            target_token=target_token_text,
+            source_velocity=source_trace["v"],
+            base_velocity=base_trace["v"],
+        )
+        print(f"    Saved NPZ: {npz_file}")
+
+        # Plot heatmap
+        if not args.no_plot:
+            plt.figure(
+                figsize=(
+                    max(16, n_prefix_tokens * 0.25),
+                    max(8, len(LAYERS_TO_TEST) * 0.3),
+                )
+            )
+
+            sns.heatmap(
+                heatmap,
+                xticklabels=prefix_token_texts,
+                yticklabels=LAYERS_TO_TEST,
+                cmap="RdBu_r",
+                center=0,
+                cbar_kws={"label": "log P(source) - log P(base)"},
+            )
+
+            plt.xlabel("Token (truncated before target)")
+            plt.ylabel("Layer")
+            plt.title(f"Activation Patching: Pair {args.pair_index + pair_idx + 1}\n"
+                      f"Target token {target_idx}: '{target_token_text.strip()}' "
+                      f"(v_source={source_trace['v']:.1f}, v_base={base_trace['v']:.1f})")
+            plt.xticks(rotation=90, fontsize=6)
+            plt.tight_layout()
+
+            plot_file = (
+                OUTPUT_DIR / f"causal_heatmap_pair_{args.pair_index + pair_idx + 1:03d}_target_{target_idx:03d}.png"
+            )
+            plt.savefig(plot_file, dpi=150, bbox_inches="tight")
+            plt.close()
+            print(f"    Saved PNG: {plot_file}")
+
+        pair_results.append(
+            {
+                "target_index": target_idx,
+                "target_token": target_token_text,
+                "n_prefix_tokens": n_prefix_tokens,
+                "npz_file": str(npz_file),
+                "png_file": str(plot_file) if not args.no_plot else None,
+            }
+        )
+
+    all_pairs_metadata.append(
+        {
+            "pair_idx": args.pair_index + pair_idx + 1,
+            "format_id": pair["format_id"],
+            "source_trace_id": source_trace["id"],
+            "base_trace_id": base_trace["id"],
+            "source_velocity": source_trace["v"],
+            "base_velocity": base_trace["v"],
+            "n_total_tokens": n_total_tokens,
+            "target_results": pair_results,
+        }
+    )
+
+    print()
+
+# Save summary
+summary_file = OUTPUT_DIR / "causal_graph_summary.json"
+with open(summary_file, "w") as f:
+    json.dump(all_pairs_metadata, f, indent=2)
+
+print("=" * 80)
+print("CAUSAL PATCHING ANALYSIS COMPLETE")
+print("=" * 80)
+print(f"Pairs analyzed: {len(all_pairs_metadata)}")
+print()
+print("OUTPUT SUMMARY:")
+print(f"  Summary JSON: {summary_file}")
+print(f"  Heatmaps: {OUTPUT_DIR}/causal_heatmap_*.png")
+print(f"  Data arrays: {OUTPUT_DIR}/causal_data_*.npz")
+print("=" * 80)
