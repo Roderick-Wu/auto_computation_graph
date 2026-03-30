@@ -23,6 +23,7 @@ import json
 import os
 import re
 import time
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,20 +35,31 @@ from transformers import AutoTokenizer
 
 load_dotenv()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+NUMBER_PATTERN = re.compile(r"(?<![\\w.])[-+]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?(?:[eE][-+]?\\d+)?(?![\\w.])")
+UNIT_PATTERN = re.compile(r"^\\s*([A-Za-z%\\/\\^\\*\\-]+(?:\\/[A-Za-z%\\/\\^\\*\\-]+)?)")
+QUESTION_MARKER_PATTERN = re.compile(
+    r"(?:\[\s*question\s*\]|question\s*[:\]\-)])",
+    re.IGNORECASE,
+)
+FINAL_ANSWER_PATTERN = re.compile(
+    r"(?:the\s+answer\s+is|final\s+answer\s*(?:is|=)|answer\s*(?:is|=|:))\s*"
+    r"([-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?)",
+    re.IGNORECASE,
+)
 
 
 def resolve_default_input_json(model_name: str, experiment: str) -> Path:
     scratch_root = Path.home() / "links" / "scratch"
     if not scratch_root.exists():
         scratch_root = Path.home() / "scratch"
-    return scratch_root / "reasoning_traces" / model_name / experiment / "traces.json"
+    return scratch_root / "traces" / model_name / experiment / "traces.json"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
     scratch_root = Path.home() / "links" / "scratch"
     if not scratch_root.exists():
         scratch_root = Path.home() / "scratch"
-    return scratch_root / "reasoning_traces" / model_name / experiment / "fixed_traces.json"
+    return scratch_root / "traces" / model_name / experiment / "fixed_traces.json"
 
 
 def resolve_default_tokenizer_path(model_name: str) -> Path:
@@ -89,16 +101,233 @@ def build_verify_fix_prompt(
         "You are a strict verifier for math/physics reasoning traces.\n"
         "Task:\n"
         "1) Check whether the EXISTING_TRACE is consistent with the prompt and metadata.\n"
-        "2) If incorrect at any step, correct the trace by patching in the valid intermediate values and final answer.\n"
-        "3) If correct, return the original trace unchanged.\n\n"
+        "2) If incorrect at any step, correct the trace by patching in the valid intermediate values and final answer. The corrected trace MUST BE IDENTICAL to the original trace EXCEPT for the corrected values.\n"
+        "3) If correct (Be reasonable with precision -- values within 5 percent are acceptable), return the original trace unchanged.\n\n"
         "Output format requirements (strict):\n"
         "- Return ONLY a JSON object, no markdown.\n"
-        "- JSON keys: is_correct (boolean), corrected_trace (string), notes (string).\n"
-        "- corrected_trace must be a single plain text block that starts with the question and includes step-by-step reasoning ending with 'The answer is ...'.\n\n"
+        "- JSON keys: is_correct (boolean), corrected_trace (string), notes (string), values (array).\n"
+        "For values array, include one object per numeric value that appears in corrected_trace:\n"
+        "- value_text (string): exact substring in corrected_trace\n"
+        "- normalized_value (string): canonical numeric form (no commas)\n"
+        "- unit (string|null): inferred unit if obvious\n"
+        "- role (string): one of given|intermediate|final|unknown\n"
+        "- variable_name (string|null): optional variable symbol/name\n"
+        "- span_start (int): 0-based inclusive char offset in corrected_trace\n"
+        "- span_end (int): 0-based exclusive char offset in corrected_trace\n"
         f"PROMPT_TEXT:\n{prompt_text}\n\n"
         f"PROMPT_METADATA:\n{json.dumps(prompt_metadata, ensure_ascii=True, sort_keys=True)}\n\n"
         f"EXISTING_TRACE:\n{existing_block}\n"
     )
+
+
+def normalize_number_string(raw: str) -> Optional[str]:
+    if raw is None:
+        return None
+    cleaned = str(raw).strip().replace(",", "")
+    if not cleaned:
+        return None
+    try:
+        dec = Decimal(cleaned)
+    except (InvalidOperation, ValueError):
+        return None
+
+    normalized = format(dec, "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    if normalized in {"", "-0"}:
+        normalized = "0"
+    return normalized
+
+
+def infer_unit_after_span(text: str, span_end: int) -> Optional[str]:
+    if span_end >= len(text):
+        return None
+    match = UNIT_PATTERN.match(text[span_end:])
+    if not match:
+        return None
+    unit = match.group(1).strip()
+    return unit or None
+
+
+def try_get_token_offsets(tokenizer: Any, text: str) -> Optional[List[Tuple[int, int]]]:
+    try:
+        encoded = tokenizer(text, return_offsets_mapping=True, add_special_tokens=False)
+    except Exception:
+        return None
+
+    offsets = encoded.get("offset_mapping") if isinstance(encoded, dict) else None
+    if not isinstance(offsets, list):
+        return None
+    return [(int(start), int(end)) for start, end in offsets]
+
+
+def char_span_to_token_span(offsets: Optional[List[Tuple[int, int]]], span_start: int, span_end: int) -> Tuple[Optional[int], Optional[int]]:
+    if offsets is None:
+        return None, None
+
+    token_start = None
+    token_end = None
+    for idx, (tok_start, tok_end) in enumerate(offsets):
+        if tok_end <= span_start:
+            continue
+        if tok_start >= span_end:
+            break
+        if token_start is None:
+            token_start = idx
+        token_end = idx + 1
+    return token_start, token_end
+
+
+def extract_numeric_spans_from_text(text: Optional[str], tokenizer: Any) -> List[Dict[str, Any]]:
+    if not text:
+        return []
+
+    offsets = try_get_token_offsets(tokenizer, text)
+    values: List[Dict[str, Any]] = []
+
+    for match in NUMBER_PATTERN.finditer(text):
+        value_text = match.group(0)
+        span_start, span_end = match.span()
+        normalized = normalize_number_string(value_text)
+        token_start, token_end = char_span_to_token_span(offsets, span_start, span_end)
+
+        values.append(
+            {
+                "value_text": value_text,
+                "normalized_value": normalized,
+                "unit": infer_unit_after_span(text, span_end),
+                "role": "unknown",
+                "variable_name": None,
+                "span_start": span_start,
+                "span_end": span_end,
+                "token_start": token_start,
+                "token_end": token_end,
+                "source": "regex",
+            }
+        )
+
+    return values
+
+
+def sanitize_model_values(raw_values: Any, trace_text: Optional[str], tokenizer: Any) -> List[Dict[str, Any]]:
+    if not isinstance(raw_values, list) or not trace_text:
+        return []
+
+    offsets = try_get_token_offsets(tokenizer, trace_text)
+    sanitized: List[Dict[str, Any]] = []
+
+    for raw in raw_values:
+        if not isinstance(raw, dict):
+            continue
+
+        span_start = raw.get("span_start")
+        span_end = raw.get("span_end")
+        if not isinstance(span_start, int) or not isinstance(span_end, int):
+            continue
+        if span_start < 0 or span_end <= span_start or span_end > len(trace_text):
+            continue
+
+        value_text = trace_text[span_start:span_end]
+        declared_value_text = raw.get("value_text")
+        if isinstance(declared_value_text, str) and declared_value_text != value_text:
+            continue
+
+        normalized = raw.get("normalized_value")
+        if not isinstance(normalized, str) or normalize_number_string(normalized) is None:
+            normalized = normalize_number_string(value_text)
+
+        token_start, token_end = char_span_to_token_span(offsets, span_start, span_end)
+        role = raw.get("role") if raw.get("role") in {"given", "intermediate", "final", "unknown"} else "unknown"
+        variable_name = raw.get("variable_name") if isinstance(raw.get("variable_name"), str) else None
+        unit = raw.get("unit") if isinstance(raw.get("unit"), str) else infer_unit_after_span(trace_text, span_end)
+
+        sanitized.append(
+            {
+                "value_text": value_text,
+                "normalized_value": normalized,
+                "unit": unit,
+                "role": role,
+                "variable_name": variable_name,
+                "span_start": span_start,
+                "span_end": span_end,
+                "token_start": token_start,
+                "token_end": token_end,
+                "source": "model",
+            }
+        )
+
+    return sanitized
+
+
+def extract_numeric_values_from_metadata(prompt_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    values: List[Dict[str, Any]] = []
+    for key, value in prompt_metadata.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            normalized = normalize_number_string(str(value))
+            values.append(
+                {
+                    "key": key,
+                    "value": value,
+                    "normalized_value": normalized,
+                }
+            )
+    return values
+
+
+def truncate_after_first_question_block(text: Optional[str]) -> Tuple[Optional[str], bool]:
+    """Truncate at the second 'Question:' marker to remove spillover into a new problem."""
+    if not text:
+        return text, False
+
+    matches = list(QUESTION_MARKER_PATTERN.finditer(text))
+    if len(matches) < 2:
+        return text, False
+
+    second_start = matches[1].start()
+    truncated = text[:second_start].rstrip()
+    return truncated, True
+
+
+def parse_float_like(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    normalized = normalize_number_string(str(value))
+    if normalized is None:
+        return None
+    try:
+        return float(normalized)
+    except Exception:
+        return None
+
+
+def extract_expected_answer_from_metadata(prompt_metadata: Dict[str, Any]) -> Tuple[Optional[str], Optional[float]]:
+    for key, value in prompt_metadata.items():
+        if not key.startswith("expected_"):
+            continue
+        expected = parse_float_like(value)
+        if expected is not None:
+            return key, expected
+    return None, None
+
+
+def extract_final_answer_value(text: Optional[str]) -> Optional[float]:
+    if not text:
+        return None
+
+    matches = list(FINAL_ANSWER_PATTERN.finditer(text))
+    if not matches:
+        return None
+
+    # Use the last explicit final-answer mention to avoid earlier intermediate mentions.
+    last = matches[-1].group(1)
+    return parse_float_like(last)
+
+
+def compute_relative_error(observed: float, expected: float) -> float:
+    denominator = max(abs(expected), 1e-12)
+    return abs(observed - expected) / denominator
 
 
 def call_api(
@@ -205,6 +434,7 @@ def main() -> None:
     parser.add_argument("--api-timeout", type=int, default=120, help="API request timeout in seconds.")
     parser.add_argument("--api-temperature", type=float, default=0.0, help="Temperature for API generation.")
     parser.add_argument("--api-max-tokens", type=int, default=1600, help="Max output tokens for API generation.")
+    parser.add_argument("--max-relative-error", type=float, default=0.05, help="Maximum allowed relative error before API correction is triggered.")
     parser.add_argument("--request-sleep-seconds", type=float, default=0.0, help="Sleep between API requests.")
     parser.add_argument("--skip-api", action="store_true", help="Skip API calls and pass-through existing traces.")
 
@@ -245,12 +475,45 @@ def main() -> None:
         is_correct = None
         notes = None
         corrected_text = existing_text
+        trace_numeric_values: List[Dict[str, Any]] = []
+        value_extraction_method = "none"
+        expected_answer_key = None
+        expected_answer_value = None
+        extracted_answer_before_api = None
+        extracted_answer_after_api = None
+        relative_error_before_api = None
+        relative_error_after_api = None
+        api_trigger_reason = None
+        api_invoked = False
+        
+        corrected_text, truncation_applied = truncate_after_first_question_block(corrected_text)
+        expected_answer_key, expected_answer_value = extract_expected_answer_from_metadata(prompt_metadata)
+        extracted_answer_before_api = extract_final_answer_value(corrected_text)
+        if expected_answer_value is not None and extracted_answer_before_api is not None:
+            relative_error_before_api = compute_relative_error(extracted_answer_before_api, expected_answer_value)
 
+        should_call_api = False
         if not args.skip_api:
+            if expected_answer_value is None:
+                should_call_api = True
+                api_trigger_reason = "missing_expected_answer"
+            elif extracted_answer_before_api is None:
+                should_call_api = True
+                api_trigger_reason = "missing_final_answer"
+            elif relative_error_before_api is not None and relative_error_before_api > args.max_relative_error:
+                should_call_api = True
+                api_trigger_reason = "relative_error_exceeds_threshold"
+            else:
+                status = "within_threshold"
+                is_correct = True
+                notes = f"Relative error {relative_error_before_api:.6f} within threshold {args.max_relative_error:.6f}."
+
+        if should_call_api:
+            api_invoked = True
             verify_prompt = build_verify_fix_prompt(
                 prompt_text=prompt_text,
                 prompt_metadata=prompt_metadata,
-                existing_trace=existing_text,
+                existing_trace=corrected_text,
             )
             response_text, _raw, error_message = call_api(
                 api_url=args.api_url,
@@ -270,13 +533,40 @@ def main() -> None:
                 else:
                     is_correct = bool(parsed.get("is_correct"))
                     corrected_text = parsed.get("corrected_trace") or existing_text
+                    corrected_text, truncation_applied_after = truncate_after_first_question_block(corrected_text)
+                    truncation_applied = truncation_applied or truncation_applied_after
                     notes = parsed.get("notes")
+                    trace_numeric_values = sanitize_model_values(parsed.get("values"), corrected_text, tokenizer)
+                    if trace_numeric_values:
+                        value_extraction_method = "model"
                     status = "ok"
             else:
                 status = "error"
 
             if args.request_sleep_seconds > 0:
                 time.sleep(args.request_sleep_seconds)
+
+        print(f"\nTrace ID {source_trace_id} verification status: {status}")
+        print(f"  original trace : {existing_text if existing_text else 'None'}")
+        print(f"  corrected trace: {corrected_text if corrected_text else 'None'}")
+        print(f"  expected answer: {expected_answer_value} (key: {expected_answer_key})")
+        print(f"  extracted answer before API: {extracted_answer_before_api} with relative error {relative_error_before_api}")
+        print(f"  extracted answer after API: {extracted_answer_after_api} with relative error {relative_error_after_api}")
+        if error_message:
+            print(f"  error message: {error_message}")
+
+        extracted_answer_after_api = extract_final_answer_value(corrected_text)
+        if expected_answer_value is not None and extracted_answer_after_api is not None:
+            relative_error_after_api = compute_relative_error(extracted_answer_after_api, expected_answer_value)
+
+
+        if not trace_numeric_values:
+            trace_numeric_values = extract_numeric_spans_from_text(corrected_text, tokenizer)
+            if trace_numeric_values:
+                value_extraction_method = "regex"
+
+        prompt_numeric_values = extract_numeric_spans_from_text(prompt_text, tokenizer)
+        metadata_numeric_values = extract_numeric_values_from_metadata(prompt_metadata)
 
         token_ids, token_strings = tokenize_text(tokenizer, corrected_text)
         prompt_length = len(tokenizer(prompt_text, return_tensors=None)["input_ids"]) if prompt_text else 0
@@ -299,12 +589,28 @@ def main() -> None:
                     "notes": notes,
                     "error": error_message,
                     "api_model": None if args.skip_api else args.api_model,
+                    "api_invoked": api_invoked,
+                    "api_trigger_reason": api_trigger_reason,
+                    "max_relative_error": args.max_relative_error,
+                    "expected_answer_key": expected_answer_key,
+                    "expected_answer_value": expected_answer_value,
+                    "extracted_answer_before_api": extracted_answer_before_api,
+                    "relative_error_before_api": relative_error_before_api,
+                    "extracted_answer_after_api": extracted_answer_after_api,
+                    "relative_error_after_api": relative_error_after_api,
+                    "truncation_applied": truncation_applied,
+                },
+                "numeric_values": {
+                    "trace": trace_numeric_values,
+                    "prompt": prompt_numeric_values,
+                    "prompt_metadata": metadata_numeric_values,
+                    "trace_extraction_method": value_extraction_method,
                 },
             }
         )
 
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "mode": "verify_and_fix",
         "input": {

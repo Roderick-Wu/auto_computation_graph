@@ -5,8 +5,8 @@ This script generates chain-of-thought responses for physics problems and saves:
 1. Token sequences (token IDs and decoded token strings)
 2. Prompt metadata (variables, hidden variables, expected answers)
 
-The traces are saved to ~/links/scratch/reasoning_traces/<model_name>/ when
-available, otherwise ~/scratch/reasoning_traces/<model_name>/.
+The traces are saved to ~/links/scratch/traces/<model_name>/ when
+available, otherwise ~/scratch/traces/<model_name>/.
 
 Usage:
     python generate_traces.py --experiment velocity --n_prompts 250

@@ -15,8 +15,8 @@ Environment variables (optional):
 
 Examples:
     python intervene_generate_pairs.py --experiment velocity
-    python intervene_generate_pairs.py --traces-json /path/to/traces.json
-    python intervene_generate_pairs.py --experiment current --output-json /tmp/api_traces.json
+    python intervene_generate_pairs.py --traces-json /path/to/fixed_traces.json
+    python intervene_generate_pairs.py --experiment current --output-json /tmp/paired_traces.json
     python intervene_generate_pairs.py --skip-api
 """
 
@@ -41,22 +41,33 @@ def resolve_default_traces_json(model_name: str, experiment: str) -> Path:
     scratch_root = Path.home() / "links" / "scratch"
     if not scratch_root.exists():
         scratch_root = Path.home() / "scratch"
-    return scratch_root / "reasoning_traces" / model_name / experiment / "traces.json"
+    return scratch_root / "traces" / model_name / experiment / "fixed_traces.json"
+
+
+def load_trace_list_from_json(path: Path) -> List[Dict[str, Any]]:
+    """Load trace list from fixed_traces payload (dict containing 'traces')."""
+    with open(path, "r") as f:
+        payload = json.load(f)
+
+    if isinstance(payload, dict) and isinstance(payload.get("traces"), list):
+        return payload["traces"]
+
+    raise ValueError("Expected fixed_traces JSON payload containing a top-level 'traces' list")
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
     scratch_root = Path.home() / "links" / "scratch"
     if not scratch_root.exists():
         scratch_root = Path.home() / "scratch"
-    return scratch_root / "reasoning_traces" / model_name / experiment / "api_traces.json"
+    return scratch_root / "traces" / model_name / experiment / "paired_traces.json"
 
 
 def resolve_default_tokenizer_path(model_name: str) -> Path:
     return REPO_ROOT / "models" / model_name
 
 
-def split_trace_fields(trace: Dict[str, Any]) -> Tuple[str, Optional[int], Dict[str, Any], Optional[int]]:
-    """Extract prompt text/metadata from a pre-generated trace entry."""
+def split_trace_fields(trace: Dict[str, Any]) -> Tuple[str, Optional[int], Dict[str, Any], Optional[int], Optional[str], List[int], List[str], Optional[int]]:
+    """Extract prompt/metadata and source trace payload from an input trace entry."""
     core_keys = {
         "id",
         "prompt",
@@ -70,13 +81,26 @@ def split_trace_fields(trace: Dict[str, Any]) -> Tuple[str, Optional[int], Dict[
     prompt_text = trace.get("prompt", "")
     format_id = trace.get("format_id")
     trace_id = trace.get("id")
+    source_generated_text = trace.get("generated_text")
+    source_tokens = trace.get("tokens") if isinstance(trace.get("tokens"), list) else []
+    source_token_strings = trace.get("token_strings") if isinstance(trace.get("token_strings"), list) else []
+    source_prompt_length = trace.get("prompt_length")
 
     if isinstance(trace.get("prompt_metadata"), dict):
         prompt_metadata = trace["prompt_metadata"]
     else:
         prompt_metadata = {k: v for k, v in trace.items() if k not in core_keys}
 
-    return prompt_text, format_id, prompt_metadata, trace_id
+    return (
+        prompt_text,
+        format_id,
+        prompt_metadata,
+        trace_id,
+        source_generated_text,
+        source_tokens,
+        source_token_strings,
+        source_prompt_length,
+    )
 
 
 def build_generation_prompt(prompt_text: str, prompt_metadata: Dict[str, Any]) -> str:
@@ -151,10 +175,15 @@ def tokenize_text(tokenizer: Any, text: Optional[str]) -> Tuple[List[int], List[
     return token_ids, token_strings
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate API traces from traces.json (no pairing).")
+    parser = argparse.ArgumentParser(description="Generate paired source/counterfactual traces from fixed_traces.json.")
     parser.add_argument("--model-name", type=str, default="Qwen2.5-72B", help="Model folder name used for tokenizer and output path.")
     parser.add_argument("--experiment", type=str, default="velocity", help="Experiment name used in default trace/output paths.")
-    parser.add_argument("--traces-json", type=Path, default=None, help="Path to traces.json produced by generate_traces.py.")
+    parser.add_argument(
+        "--traces-json",
+        type=Path,
+        default=None,
+        help="Path to fixed_traces.json produced by intervene_fix_traces.py.",
+    )
     parser.add_argument("--max-traces", type=int, default=None, help="Optional cap on number of loaded traces to process.")
     parser.add_argument("--output-json", type=Path, default=None, help="Output path for API traces JSON.")
     parser.add_argument("--tokenizer-path", type=Path, default=None, help="Tokenizer path for tokenizing generated traces.")
@@ -174,10 +203,7 @@ def main() -> None:
     if not traces_json.exists():
         raise FileNotFoundError(f"Traces file not found: {traces_json}")
 
-    with open(traces_json, "r") as f:
-        loaded_traces = json.load(f)
-    if not isinstance(loaded_traces, list):
-        raise ValueError("Expected traces JSON to be a list of trace objects")
+    loaded_traces = load_trace_list_from_json(traces_json)
 
     if args.max_traces is not None:
         if args.max_traces <= 0:
@@ -195,10 +221,19 @@ def main() -> None:
 
     print(f"Loaded traces: {len(loaded_traces)}")
 
-    traces_out: List[Dict[str, Any]] = []
+    pairs_out: List[Dict[str, Any]] = []
 
     for out_id, source_trace in enumerate(loaded_traces):
-        prompt_text, format_id, prompt_metadata, source_trace_id = split_trace_fields(source_trace)
+        (
+            prompt_text,
+            format_id,
+            prompt_metadata,
+            source_trace_id,
+            source_generated_text,
+            source_tokens,
+            source_token_strings,
+            source_prompt_length,
+        ) = split_trace_fields(source_trace)
 
         status = "skipped"
         error_message = None
@@ -222,17 +257,27 @@ def main() -> None:
         token_ids, token_strings = tokenize_text(tokenizer, generated_text)
         prompt_length = len(tokenizer(prompt_text, return_tensors=None)["input_ids"]) if prompt_text else 0
 
-        traces_out.append(
+        pairs_out.append(
             {
                 "id": out_id,
                 "source_trace_id": source_trace_id,
                 "format_id": format_id,
                 "prompt": prompt_text,
                 "prompt_metadata": prompt_metadata,
-                "tokens": token_ids,
-                "token_strings": token_strings,
-                "prompt_length": prompt_length,
-                "generated_text": generated_text,
+                "pair": {
+                    "source": {
+                        "generated_text": source_generated_text,
+                        "tokens": source_tokens,
+                        "token_strings": source_token_strings,
+                        "prompt_length": source_prompt_length,
+                    },
+                    "counterfactual": {
+                        "generated_text": generated_text,
+                        "tokens": token_ids,
+                        "token_strings": token_strings,
+                        "prompt_length": prompt_length,
+                    },
+                },
                 "api": {
                     "status": status,
                     "error": error_message,
@@ -241,10 +286,14 @@ def main() -> None:
             }
         )
 
+        print(f"\nProcessed trace ID {source_trace_id} -> pair ID {out_id} with API status: {status}")
+        print(f"  Source generated text: {source_generated_text if source_generated_text else 'None'}...")
+        print(f"  Counterfactual generated text: {generated_text if generated_text else 'None'}...")
+
     payload = {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "mode": "pure_api_from_traces_json",
+        "mode": "paired_counterfactual_from_traces_json",
         "input": {
             "experiment": args.experiment,
             "traces_json": str(traces_json),
@@ -258,8 +307,8 @@ def main() -> None:
             "api_max_tokens": args.api_max_tokens,
             "api_timeout": args.api_timeout,
         },
-        "n_traces": len(traces_out),
-        "traces": traces_out,
+        "n_pairs": len(pairs_out),
+        "pairs": pairs_out,
     }
 
     output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -267,11 +316,11 @@ def main() -> None:
         json.dump(payload, f, indent=2)
 
     print("=" * 80)
-    print("API TRACE GENERATION COMPLETE")
+    print("PAIRED TRACE GENERATION COMPLETE")
     print("=" * 80)
     print(f"Experiment: {args.experiment}")
     print(f"Input traces JSON: {traces_json}")
-    print(f"Generated traces: {len(traces_out)}")
+    print(f"Generated pairs: {len(pairs_out)}")
     print(f"API calls enabled: {not args.skip_api}")
     print(f"Output JSON: {output_json}")
     print("=" * 80)
