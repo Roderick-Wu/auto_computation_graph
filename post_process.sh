@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=generate_pairs
+#SBATCH --job-name=post_process_pairs
 #SBATCH --time=0-4:00:00
 #SBATCH --account=def-rgrosse
 #SBATCH --mem=64G
@@ -8,7 +8,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
-    echo "Usage: sbatch generate_pairs.sh <experiment> [model_name]"
+    echo "Usage: sbatch post_process_pairs.sh <experiment> [model_name]"
     exit 1
 fi
 
@@ -20,7 +20,7 @@ if [ ! -d "$scratch_root" ]; then
     scratch_root="$HOME/scratch"
 fi
 
-traces_json="$scratch_root/traces/$model_name/$experiment/fixed_traces.json"
+traces_json="$scratch_root/traces/$model_name/$experiment/paired_traces.json"
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
@@ -32,7 +32,7 @@ if [ -d venv ]; then
     source venv/bin/activate
 fi
 
-python intervene_generate_pairs.py \
+python post_process_pairs.py \
     --model-name "$model_name" \
     --experiment "$experiment" \
-    --traces-json "$traces_json" \
+    --input-json "$traces_json" \

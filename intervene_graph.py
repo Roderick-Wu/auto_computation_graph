@@ -1,6 +1,6 @@
 """Causal activation patching runner.
 
-For each experiment entry from truncated_traces.json (already tied to a truncation index):
+For each experiment entry (either precomputed experiments or built from aligned pairs):
 1. Run SOURCE forward pass and capture all layer activations.
 2. Run TARGET forward pass and score log P(next SOURCE token) at each position.
 3. For every layer and token position, patch SOURCE->TARGET at that single cell,
@@ -16,6 +16,7 @@ Outputs are organized as:
             matrix_t<trunc_idx>.json
 """
 
+import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,11 +32,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # GLOBAL CONFIGURATION - EDIT THESE
 # ============================================================================
 
-# Path to truncated traces from inspect_tokens_simple.py
-TRUNCATED_TRACES_JSON = Path("/home/wuroderi/links/scratch/reasoning_traces/Qwen2.5-32B/velocity/truncated_traces.json")
+# Input can be either:
+#  - legacy truncated experiments payload with top-level "experiments"
+#  - aligned pairs payload with top-level "pairs"
+INPUT_JSON = Path("/home/wuroderi/links/scratch/traces/Qwen2.5-32B/velocity/aligned_pairs.json")
 
 # Output directory (contains per-experiment folders)
-OUTPUT_ROOT_DIR = Path("/home/wuroderi/links/scratch/reasoning_traces/Qwen2.5-32B/velocity/patch_runs")
+OUTPUT_ROOT_DIR = Path("/home/wuroderi/links/scratch/traces/Qwen2.5-32B/velocity/patch_runs")
 
 # Summary JSON across all runs
 OUTPUT_SUMMARY_JSON = OUTPUT_ROOT_DIR / "patching_summary.json"
@@ -59,6 +62,146 @@ DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 
 MODEL_PATH = "/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Qwen2.5-32B"
 TOKENIZER_PATH = MODEL_PATH
+
+
+def parse_int_list(raw: Optional[str]) -> Optional[List[int]]:
+    if raw is None:
+        return None
+    text = raw.strip()
+    if text == "" or text.lower() == "all":
+        return None
+    out: List[int] = []
+    for chunk in text.split(","):
+        part = chunk.strip()
+        if not part:
+            continue
+        out.append(int(part))
+    return out
+
+
+def parse_str_list(raw: Optional[str]) -> Optional[List[str]]:
+    if raw is None:
+        return None
+    text = raw.strip()
+    if text == "" or text.lower() == "all":
+        return None
+    out: List[str] = []
+    for chunk in text.split(","):
+        part = chunk.strip()
+        if part:
+            out.append(part)
+    return out
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run token/layer activation patching and export heatmaps + matrices.")
+    parser.add_argument("--input-json", type=Path, default=INPUT_JSON, help="Input JSON with top-level 'pairs' or 'experiments'.")
+    parser.add_argument("--output-root-dir", type=Path, default=OUTPUT_ROOT_DIR, help="Output root directory for run artifacts.")
+    parser.add_argument("--output-summary-json", type=Path, default=None, help="Optional summary JSON path (default: <output-root-dir>/patching_summary.json).")
+
+    parser.add_argument("--experiment-indices", type=str, default=None, help="Comma-separated experiment indices, e.g. '0,1,2'.")
+    parser.add_argument("--experiment-ids", type=str, default=None, help="Comma-separated experiment IDs, e.g. 'pair1_value3,pair2_value0'.")
+    parser.add_argument("--layers-to-patch", type=str, default=None, help="Comma-separated layer indices, or 'all'.")
+    parser.add_argument("--token-positions-to-patch", type=str, default=None, help="Comma-separated token positions, or 'all'.")
+
+    parser.add_argument("--model-path", type=str, default=MODEL_PATH, help="Model path for AutoModelForCausalLM.")
+    parser.add_argument("--tokenizer-path", type=str, default=TOKENIZER_PATH, help="Tokenizer path for AutoTokenizer.")
+    parser.add_argument("--device", type=str, default=DEVICE, help="Device to run on (e.g., cuda, cpu).")
+    parser.add_argument("--dtype", type=str, default="float16" if DTYPE == torch.float16 else "float32", choices=["float16", "float32"], help="Model dtype.")
+    return parser
+
+
+def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
+    pairs = payload.get("pairs")
+    if not isinstance(pairs, list):
+        return []
+
+    experiments: List[Dict] = []
+    for pidx, pair in enumerate(pairs):
+        pair_id = pair.get("id", pidx)
+        source_block = pair.get("pair", {}).get("source", {})
+        cf_block = pair.get("pair", {}).get("counterfactual", {})
+
+        # Terminology normalization: patch SOURCE onto BASE.
+        # BASE := original/source trace, SOURCE := counterfactual trace.
+        base_token_ids = source_block.get("tokens") if isinstance(source_block.get("tokens"), list) else []
+        source_token_ids = cf_block.get("tokens") if isinstance(cf_block.get("tokens"), list) else []
+        if not base_token_ids or not source_token_ids:
+            continue
+
+        matched_values = (
+            pair.get("post_process", {})
+            .get("numeric_length_alignment", {})
+            .get("matched_values", [])
+        )
+
+        if isinstance(matched_values, list) and matched_values:
+            for mv in matched_values:
+                if not isinstance(mv, dict):
+                    continue
+                pos = mv.get("position")
+                source_tok = mv.get("source", {}).get("token_start")
+                base_tok = mv.get("counterfactual", {}).get("token_start")
+                if not isinstance(source_tok, int) or not isinstance(base_tok, int):
+                    continue
+                trunc_idx = min(source_tok, base_tok)
+                if trunc_idx <= 0:
+                    continue
+                if trunc_idx >= len(source_token_ids) or trunc_idx >= len(base_token_ids):
+                    continue
+
+                experiments.append(
+                    {
+                        "experiment_id": f"pair{pair_id}_value{pos}",
+                        "pair_id": pair_id,
+                        "experiment_type": "value_match",
+                        "truncation_token_index": trunc_idx,
+                        "source": {
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
+                        },
+                        "target": {
+                            "token_ids": base_token_ids,
+                            "score_token_id": int(base_token_ids[trunc_idx]),
+                        },
+                    }
+                )
+        else:
+            usable_len = min(len(source_token_ids), len(base_token_ids))
+            if usable_len <= 1:
+                continue
+            trunc_idx = usable_len - 1
+            experiments.append(
+                {
+                    "experiment_id": f"pair{pair_id}_tail",
+                    "pair_id": pair_id,
+                    "experiment_type": "tail_fallback",
+                    "truncation_token_index": trunc_idx,
+                    "source": {
+                        "token_ids": source_token_ids,
+                        "score_token_id": int(source_token_ids[trunc_idx]),
+                    },
+                    "target": {
+                        "token_ids": base_token_ids,
+                        "score_token_id": int(base_token_ids[trunc_idx]),
+                    },
+                }
+            )
+
+    return experiments
+
+
+def load_experiments_from_input(path: Path) -> List[Dict]:
+    with open(path, "r") as f:
+        payload = json.load(f)
+
+    if isinstance(payload, dict) and isinstance(payload.get("experiments"), list):
+        return payload["experiments"]
+
+    if isinstance(payload, dict) and isinstance(payload.get("pairs"), list):
+        return build_experiments_from_pairs(payload)
+
+    raise ValueError("Input JSON must contain top-level 'experiments' or 'pairs'")
 
 def load_model_and_tokenizer():
     """Load model and tokenizer."""
@@ -216,12 +359,39 @@ def plot_single_heatmap(
 
 
 def main():
+    global INPUT_JSON
+    global OUTPUT_ROOT_DIR
+    global OUTPUT_SUMMARY_JSON
+    global EXPERIMENT_INDICES
+    global EXPERIMENT_IDS
+    global LAYERS_TO_PATCH
+    global TOKEN_POSITIONS_TO_PATCH
+    global MODEL_PATH
+    global TOKENIZER_PATH
+    global DEVICE
+    global DTYPE
+
+    args = build_arg_parser().parse_args()
+    INPUT_JSON = args.input_json
+    OUTPUT_ROOT_DIR = args.output_root_dir
+    OUTPUT_SUMMARY_JSON = args.output_summary_json or (OUTPUT_ROOT_DIR / "patching_summary.json")
+
+    EXPERIMENT_INDICES = parse_int_list(args.experiment_indices)
+    EXPERIMENT_IDS = parse_str_list(args.experiment_ids)
+    LAYERS_TO_PATCH = parse_int_list(args.layers_to_patch)
+    TOKEN_POSITIONS_TO_PATCH = parse_int_list(args.token_positions_to_patch)
+
+    MODEL_PATH = args.model_path
+    TOKENIZER_PATH = args.tokenizer_path
+    DEVICE = args.device
+    DTYPE = torch.float16 if args.dtype == "float16" else torch.float32
+
     print("\n" + "=" * 100)
     print("ACTIVATION PATCHING ENGINE")
     print("=" * 100)
 
     print(f"\nConfiguration:")
-    print(f"  Truncated traces: {TRUNCATED_TRACES_JSON}")
+    print(f"  Input JSON: {INPUT_JSON}")
     print(f"  Output root dir: {OUTPUT_ROOT_DIR}")
     print(f"  Summary JSON: {OUTPUT_SUMMARY_JSON}")
     print(f"  Experiment IDs filter: {EXPERIMENT_IDS if EXPERIMENT_IDS else 'none'}")
@@ -235,11 +405,8 @@ def main():
     n_layers_total = len(layers)
     print(f"  Resolved transformer layers: {n_layers_total}")
 
-    print(f"\nLoading truncated traces from {TRUNCATED_TRACES_JSON}...")
-    with open(TRUNCATED_TRACES_JSON, "r") as f:
-        traces_data = json.load(f)
-
-    experiments = traces_data["experiments"]
+    print(f"\nLoading experiments from {INPUT_JSON}...")
+    experiments = load_experiments_from_input(INPUT_JSON)
     print(f"Loaded {len(experiments)} experiments")
 
     if EXPERIMENT_IDS is not None:
@@ -301,7 +468,7 @@ def main():
         source_score_token_id = exp["source"].get("score_token_id")
         base_score_token_id = exp["target"].get("score_token_id")
         if source_score_token_id is None or base_score_token_id is None:
-            print("    Warning: missing score_token_id in experiment data. Regenerate truncated_traces.json with inspect_tokens_simple.py. Skipping.")
+            print("    Warning: missing score_token_id in experiment data. Ensure INPUT_JSON includes score targets or aligned pairs with matched token spans. Skipping.")
             continue
 
         print(f"    SOURCE/TARGET usable length: {usable_len}")
@@ -316,8 +483,11 @@ def main():
         baseline_base_scores = compute_next_token_logprobs(baseline_logits, base_token_ids, usable_len)
         # Truncation index n is exclusive context [0..n-1]; score token index n
         # from logits at position n-1.
-        score_pos = usable_len - 1
-        scored_token_index = usable_len
+        if not isinstance(trunc_idx, int) or trunc_idx <= 0 or trunc_idx >= usable_len:
+            print(f"    Warning: invalid truncation index {trunc_idx} for usable_len={usable_len}, skipping.")
+            continue
+        score_pos = trunc_idx - 1
+        scored_token_index = trunc_idx
         baseline_source_score = score_logprob_at_position(baseline_logits, score_pos, int(source_score_token_id))
         baseline_base_score = score_logprob_at_position(baseline_logits, score_pos, int(base_score_token_id))
 

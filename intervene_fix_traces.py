@@ -114,6 +114,7 @@ def build_verify_fix_prompt(
         "- variable_name (string|null): optional variable symbol/name\n"
         "- span_start (int): 0-based inclusive char offset in corrected_trace\n"
         "- span_end (int): 0-based exclusive char offset in corrected_trace\n"
+        "For the values array, include all numeric values in the trace, even if they were not given in the prompt metadata, to help with downstream analysis.\n\n"
         f"PROMPT_TEXT:\n{prompt_text}\n\n"
         f"PROMPT_METADATA:\n{json.dumps(prompt_metadata, ensure_ascii=True, sort_keys=True)}\n\n"
         f"EXISTING_TRACE:\n{existing_block}\n"
@@ -468,23 +469,16 @@ def main() -> None:
     traces_out: List[Dict[str, Any]] = []
 
     for out_id, source_trace in enumerate(loaded_traces):
-        prompt_text, format_id, prompt_metadata, source_trace_id, existing_text = split_trace_fields(source_trace)
+        prompt_text, _format_id, prompt_metadata, source_trace_id, existing_text = split_trace_fields(source_trace)
 
         status = "skipped"
         error_message = None
-        is_correct = None
-        notes = None
         corrected_text = existing_text
         trace_numeric_values: List[Dict[str, Any]] = []
-        value_extraction_method = "none"
         expected_answer_key = None
         expected_answer_value = None
         extracted_answer_before_api = None
-        extracted_answer_after_api = None
         relative_error_before_api = None
-        relative_error_after_api = None
-        api_trigger_reason = None
-        api_invoked = False
         
         corrected_text, truncation_applied = truncate_after_first_question_block(corrected_text)
         expected_answer_key, expected_answer_value = extract_expected_answer_from_metadata(prompt_metadata)
@@ -496,20 +490,14 @@ def main() -> None:
         if not args.skip_api:
             if expected_answer_value is None:
                 should_call_api = True
-                api_trigger_reason = "missing_expected_answer"
             elif extracted_answer_before_api is None:
                 should_call_api = True
-                api_trigger_reason = "missing_final_answer"
             elif relative_error_before_api is not None and relative_error_before_api > args.max_relative_error:
                 should_call_api = True
-                api_trigger_reason = "relative_error_exceeds_threshold"
             else:
                 status = "within_threshold"
-                is_correct = True
-                notes = f"Relative error {relative_error_before_api:.6f} within threshold {args.max_relative_error:.6f}."
 
         if should_call_api:
-            api_invoked = True
             verify_prompt = build_verify_fix_prompt(
                 prompt_text=prompt_text,
                 prompt_metadata=prompt_metadata,
@@ -531,14 +519,10 @@ def main() -> None:
                     status = "error"
                     error_message = "Could not parse verifier JSON output"
                 else:
-                    is_correct = bool(parsed.get("is_correct"))
                     corrected_text = parsed.get("corrected_trace") or existing_text
                     corrected_text, truncation_applied_after = truncate_after_first_question_block(corrected_text)
                     truncation_applied = truncation_applied or truncation_applied_after
-                    notes = parsed.get("notes")
                     trace_numeric_values = sanitize_model_values(parsed.get("values"), corrected_text, tokenizer)
-                    if trace_numeric_values:
-                        value_extraction_method = "model"
                     status = "ok"
             else:
                 status = "error"
@@ -551,82 +535,29 @@ def main() -> None:
         print(f"  corrected trace: {corrected_text if corrected_text else 'None'}")
         print(f"  expected answer: {expected_answer_value} (key: {expected_answer_key})")
         print(f"  extracted answer before API: {extracted_answer_before_api} with relative error {relative_error_before_api}")
-        print(f"  extracted answer after API: {extracted_answer_after_api} with relative error {relative_error_after_api}")
         if error_message:
             print(f"  error message: {error_message}")
 
-        extracted_answer_after_api = extract_final_answer_value(corrected_text)
-        if expected_answer_value is not None and extracted_answer_after_api is not None:
-            relative_error_after_api = compute_relative_error(extracted_answer_after_api, expected_answer_value)
-
-
         if not trace_numeric_values:
             trace_numeric_values = extract_numeric_spans_from_text(corrected_text, tokenizer)
-            if trace_numeric_values:
-                value_extraction_method = "regex"
-
-        prompt_numeric_values = extract_numeric_spans_from_text(prompt_text, tokenizer)
-        metadata_numeric_values = extract_numeric_values_from_metadata(prompt_metadata)
-
-        token_ids, token_strings = tokenize_text(tokenizer, corrected_text)
-        prompt_length = len(tokenizer(prompt_text, return_tensors=None)["input_ids"]) if prompt_text else 0
+        token_ids, _token_strings = tokenize_text(tokenizer, corrected_text)
+        prompt_token_ids, _prompt_token_strings = tokenize_text(tokenizer, prompt_text)
 
         traces_out.append(
             {
                 "id": out_id,
-                "source_trace_id": source_trace_id,
-                "format_id": format_id,
+                "trace_id": source_trace_id,
                 "prompt": prompt_text,
                 "prompt_metadata": prompt_metadata,
-                "original_generated_text": existing_text,
+                "prompt_tokens": prompt_token_ids,
                 "generated_text": corrected_text,
                 "tokens": token_ids,
-                "token_strings": token_strings,
-                "prompt_length": prompt_length,
-                "verification": {
-                    "status": status,
-                    "is_correct": is_correct,
-                    "notes": notes,
-                    "error": error_message,
-                    "api_model": None if args.skip_api else args.api_model,
-                    "api_invoked": api_invoked,
-                    "api_trigger_reason": api_trigger_reason,
-                    "max_relative_error": args.max_relative_error,
-                    "expected_answer_key": expected_answer_key,
-                    "expected_answer_value": expected_answer_value,
-                    "extracted_answer_before_api": extracted_answer_before_api,
-                    "relative_error_before_api": relative_error_before_api,
-                    "extracted_answer_after_api": extracted_answer_after_api,
-                    "relative_error_after_api": relative_error_after_api,
-                    "truncation_applied": truncation_applied,
-                },
-                "numeric_values": {
-                    "trace": trace_numeric_values,
-                    "prompt": prompt_numeric_values,
-                    "prompt_metadata": metadata_numeric_values,
-                    "trace_extraction_method": value_extraction_method,
-                },
+                "values": trace_numeric_values,
             }
         )
 
     payload = {
-        "schema_version": 2,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "mode": "verify_and_fix",
-        "input": {
-            "experiment": args.experiment,
-            "input_json": str(input_json),
-            "n_loaded_traces": len(loaded_traces),
-        },
-        "api": {
-            "skip_api": args.skip_api,
-            "api_url": args.api_url,
-            "api_model": args.api_model,
-            "api_temperature": args.api_temperature,
-            "api_max_tokens": args.api_max_tokens,
-            "api_timeout": args.api_timeout,
-        },
-        "n_traces": len(traces_out),
         "traces": traces_out,
     }
 
