@@ -5,15 +5,19 @@ For each experiment entry (either precomputed experiments or built from aligned 
 2. Run TARGET forward pass and score log P(next SOURCE token) at each position.
 3. For every layer and token position, patch SOURCE->TARGET at that single cell,
      rerun TARGET, and measure delta logprob.
-4. Save one heatmap per truncation entry.
+4. Save heatmaps per numeric value within each pair.
 
 Outputs are organized as:
     OUTPUT_ROOT_DIR/
-        <experiment_id>/
-            source_heatmap_t<trunc_idx>.png
-            base_heatmap_t<trunc_idx>.png
-            sum_heatmap_t<trunc_idx>.png
-            matrix_t<trunc_idx>.json
+        pair0/
+            source_heatmap_v0_t<trunc_idx>.png
+            base_heatmap_v0_t<trunc_idx>.png
+            diff_heatmap_v0_t<trunc_idx>.png
+            matrix_v0_t<trunc_idx>.json
+            source_heatmap_v1_t<trunc_idx>.png
+            ... (one set per numeric value in CoT)
+        pair1/
+            ...
 """
 
 import argparse
@@ -126,8 +130,17 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         # BASE := original/source trace, SOURCE := counterfactual trace.
         base_token_ids = source_block.get("tokens") if isinstance(source_block.get("tokens"), list) else []
         source_token_ids = cf_block.get("tokens") if isinstance(cf_block.get("tokens"), list) else []
+        source_text = source_block.get("text", "")
         if not base_token_ids or not source_token_ids:
             continue
+
+        # Find where the CoT starts ("Answer (step-by-step)")
+        cot_marker = "Answer (step-by-step)"
+        cot_start_pos = source_text.find(cot_marker)
+        if cot_start_pos == -1:
+            # If marker not found, no CoT values to process
+            continue
+        cot_start_pos += len(cot_marker)
 
         matched_values = (
             pair.get("post_process", {})
@@ -135,10 +148,23 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
             .get("matched_values", [])
         )
 
-        if isinstance(matched_values, list) and matched_values:
+        # Filter to only values that appear in the CoT region (after "Answer (step-by-step)")
+        cot_values = []
+        if isinstance(matched_values, list):
             for mv in matched_values:
                 if not isinstance(mv, dict):
                     continue
+                # Check if value's source span starts in CoT region
+                source_span = mv.get("source", {})
+                span_start = source_span.get("span", {}).get("start")
+                if span_start is not None and span_start >= cot_start_pos:
+                    cot_values.append(mv)
+
+        # Sort in reverse order by span start position (final answer first)
+        cot_values.sort(key=lambda x: x.get("source", {}).get("span", {}).get("start", 0), reverse=True)
+
+        if cot_values:
+            for v_idx, mv in enumerate(cot_values):
                 pos = mv.get("position")
                 source_tok = mv.get("source", {}).get("token_start")
                 base_tok = mv.get("counterfactual", {}).get("token_start")
@@ -152,8 +178,9 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
 
                 experiments.append(
                     {
-                        "experiment_id": f"pair{pair_id}_value{pos}",
+                        "experiment_id": f"pair{pair_id}_v{v_idx}",
                         "pair_id": pair_id,
+                        "value_index": v_idx,
                         "experiment_type": "value_match",
                         "truncation_token_index": trunc_idx,
                         "source": {
@@ -167,26 +194,27 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
                     }
                 )
         else:
+            # Fallback: if no CoT values found, use tail position
             usable_len = min(len(source_token_ids), len(base_token_ids))
-            if usable_len <= 1:
-                continue
-            trunc_idx = usable_len - 1
-            experiments.append(
-                {
-                    "experiment_id": f"pair{pair_id}_tail",
-                    "pair_id": pair_id,
-                    "experiment_type": "tail_fallback",
-                    "truncation_token_index": trunc_idx,
-                    "source": {
-                        "token_ids": source_token_ids,
-                        "score_token_id": int(source_token_ids[trunc_idx]),
-                    },
-                    "target": {
-                        "token_ids": base_token_ids,
-                        "score_token_id": int(base_token_ids[trunc_idx]),
-                    },
-                }
-            )
+            if usable_len > 1:
+                trunc_idx = usable_len - 1
+                experiments.append(
+                    {
+                        "experiment_id": f"pair{pair_id}_tail",
+                        "pair_id": pair_id,
+                        "value_index": -1,
+                        "experiment_type": "tail_fallback",
+                        "truncation_token_index": trunc_idx,
+                        "source": {
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
+                        },
+                        "target": {
+                            "token_ids": base_token_ids,
+                            "score_token_id": int(base_token_ids[trunc_idx]),
+                        },
+                    }
+                )
 
     return experiments
 
@@ -427,6 +455,7 @@ def main():
     print(f"Running {len(exp_indices)} experiments...")
 
     run_records = []
+    pair_merged_payloads = {}
     OUTPUT_ROOT_DIR.mkdir(parents=True, exist_ok=True)
 
     for exp_idx in exp_indices:
@@ -437,6 +466,7 @@ def main():
         exp = experiments[exp_idx]
         exp_id = exp.get("experiment_id", f"idx_{exp_idx}")
         pair_id = exp["pair_id"]
+        value_index = exp.get("value_index", -1)
         exp_type = exp["experiment_type"]
         trunc_idx = exp["truncation_token_index"]
 
@@ -459,12 +489,15 @@ def main():
             print("    Warning: no valid layers to patch, skipping.")
             continue
 
-        pos_indices = list(range(usable_len)) if TOKEN_POSITIONS_TO_PATCH is None else list(TOKEN_POSITIONS_TO_PATCH)
-        pos_indices = [p for p in pos_indices if 0 <= p < usable_len]
+        # Limit token positions to patch up to truncation index (don't patch past truncation point)
+        if TOKEN_POSITIONS_TO_PATCH is None:
+            pos_indices = list(range(trunc_idx))
+        else:
+            pos_indices = [p for p in TOKEN_POSITIONS_TO_PATCH if 0 <= p < trunc_idx]
+        
         if not pos_indices:
-            print("    Warning: no valid token positions to patch, skipping.")
+            print(f"    Warning: no valid token positions to patch (truncation at {trunc_idx}), skipping.")
             continue
-
         source_score_token_id = exp["source"].get("score_token_id")
         base_score_token_id = exp["target"].get("score_token_id")
         if source_score_token_id is None or base_score_token_id is None:
@@ -510,13 +543,16 @@ def main():
                 source_delta_matrix[li, pi] = patched_source_score - baseline_source_score
                 base_delta_matrix[li, pi] = patched_base_score - baseline_base_score
 
-        exp_dir = OUTPUT_ROOT_DIR / exp_id
+        # All outputs for a pair go into a single pair{id} directory
+        exp_dir = OUTPUT_ROOT_DIR / f"pair{pair_id}"
         exp_dir.mkdir(parents=True, exist_ok=True)
 
-        source_heatmap_png = exp_dir / f"source_heatmap_t{trunc_idx}.png"
-        base_heatmap_png = exp_dir / f"base_heatmap_t{trunc_idx}.png"
-        diff_heatmap_png = exp_dir / f"diff_heatmap_t{trunc_idx}.png"
-        matrix_json = exp_dir / f"matrix_t{trunc_idx}.json"
+        # Include value_index in filenames to distinguish different numeric values within the pair
+        value_suffix = f"_v{value_index}" if value_index >= 0 else "_tail"
+        source_heatmap_png = exp_dir / f"source_heatmap{value_suffix}_t{trunc_idx}.png"
+        base_heatmap_png = exp_dir / f"base_heatmap{value_suffix}_t{trunc_idx}.png"
+        diff_heatmap_png = exp_dir / f"diff_heatmap{value_suffix}_t{trunc_idx}.png"
+        pair_json = exp_dir / "pair_matrices.json"
         x_tick_labels = build_x_tick_labels(tokenizer, source_token_ids, pos_indices)
         diff_delta_matrix = source_delta_matrix - base_delta_matrix
 
@@ -575,6 +611,7 @@ def main():
         matrix_payload = {
             "experiment_id": exp_id,
             "pair_id": pair_id,
+            "value_index": value_index,
             "experiment_type": exp_type,
             "truncation_token_index": trunc_idx,
             "usable_len": usable_len,
@@ -596,19 +633,29 @@ def main():
             "base_delta_matrix": base_delta_matrix.tolist(),
             "diff_delta_matrix": diff_delta_matrix.tolist(),
         }
-        with open(matrix_json, "w") as f:
-            json.dump(matrix_payload, f, indent=2)
+
+        pair_key = f"pair{pair_id}"
+        if pair_key not in pair_merged_payloads:
+            pair_merged_payloads[pair_key] = {
+                "schema_version": "v1",
+                "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "model": "Qwen2.5-32B",
+                "pair_id": pair_id,
+                "entries": [],
+            }
+        pair_merged_payloads[pair_key]["entries"].append(matrix_payload)
 
         run_records.append(
             {
                 "experiment_id": exp_id,
                 "pair_id": pair_id,
+                "value_index": value_index,
                 "experiment_type": exp_type,
                 "truncation_token_index": trunc_idx,
                 "source_heatmap_png": str(source_heatmap_png),
                 "base_heatmap_png": str(base_heatmap_png),
                 "diff_heatmap_png": str(diff_heatmap_png),
-                "matrix_json": str(matrix_json),
+                "pair_json": str(pair_json),
                 "usable_len": usable_len,
                 "n_layers": len(layer_indices),
                 "n_positions": len(pos_indices),
@@ -617,6 +664,16 @@ def main():
         print(f"    Saved: {source_heatmap_png}")
         print(f"    Saved: {base_heatmap_png}")
         print(f"    Saved: {diff_heatmap_png}")
+
+    for pair_key, payload in pair_merged_payloads.items():
+        pair_dir = OUTPUT_ROOT_DIR / pair_key
+        pair_json = pair_dir / "pair_matrices.json"
+        entries = payload.get("entries", [])
+        entries.sort(key=lambda x: x.get("truncation_token_index", 0), reverse=True)
+        payload["n_entries"] = len(entries)
+        with open(pair_json, "w") as f:
+            json.dump(payload, f, indent=2)
+        print(f"Saved merged pair JSON: {pair_json}")
 
     print(f"\n" + "=" * 100)
     print(f"Writing summary to {OUTPUT_SUMMARY_JSON}...")
