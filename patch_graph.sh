@@ -20,9 +20,10 @@ module load python/3.11.5 cuda/12.6 scipy-stack/2023b arrow/21.0.0
 
 # Default experiment (e.g., "velocity")
 EXPERIMENT=${1:-velocity}
+MODEL_NAME=${2:-Qwen2.5-32B}
 
 # Input/output paths
-TRACES_DIR="/home/wuroderi/links/scratch/traces/Qwen2.5-32B/${EXPERIMENT}"
+TRACES_DIR="/home/wuroderi/links/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
 INPUT_JSON="${TRACES_DIR}/aligned_pairs.json"
 OUTPUT_ROOT_DIR="${TRACES_DIR}/patch_runs"
 

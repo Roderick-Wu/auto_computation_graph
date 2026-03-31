@@ -206,19 +206,13 @@ def parse_float(value: str) -> Optional[float]:
 
 
 def pad_value_to_target_length(value_text: str, other_value_text: str, target_len: int) -> str:
-    """Pad a value to target length using decimal/zero rules without shortening."""
+    """Pad a value to target length by appending decimal zeros (never prepend)."""
     if len(value_text) >= target_len:
         return value_text
 
     missing = target_len - len(value_text)
     if "." in value_text:
         return value_text + ("0" * missing)
-
-    # If this would only add a decimal point, use leading zero instead.
-    if missing == 1 and "." not in value_text and "." not in other_value_text:
-        if value_text.startswith("-"):
-            return "-0" + value_text[1:]
-        return "0" + value_text
 
     out = value_text + "."
     zeros_needed = target_len - len(out)
@@ -257,9 +251,17 @@ def rewrite_pair_by_matched_lengths(source_text: str, cf_text: str) -> Tuple[str
     differing_values: List[Dict[str, Any]] = []
 
     for idx, ((src_start, src_end, src_num), (cf_start, cf_end, cf_num)) in enumerate(zip(source_nums, cf_nums)):
-        target_len = max(len(src_num), len(cf_num))
-        new_src_num = pad_value_to_target_length(src_num, cf_num, target_len)
-        new_cf_num = pad_value_to_target_length(cf_num, src_num, target_len)
+        # For integer pairs that differ by exactly one digit in length,
+        # make both decimal first, then pad with decimal zeros to equal length.
+        src_for_pad = src_num
+        cf_for_pad = cf_num
+        if "." not in src_num and "." not in cf_num and abs(len(src_num) - len(cf_num)) == 1:
+            src_for_pad = src_num + ".0"
+            cf_for_pad = cf_num + ".0"
+
+        target_len = max(len(src_for_pad), len(cf_for_pad))
+        new_src_num = pad_value_to_target_length(src_for_pad, cf_for_pad, target_len)
+        new_cf_num = pad_value_to_target_length(cf_for_pad, src_for_pad, target_len)
 
         src_pieces.append(source_text[src_cursor:src_start])
         src_pieces.append(new_src_num)
