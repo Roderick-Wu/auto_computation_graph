@@ -66,6 +66,7 @@ DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 
 MODEL_PATH = "/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Qwen2.5-32B"
 TOKENIZER_PATH = MODEL_PATH
+SAVE_PLOTS = True
 
 
 def parse_int_list(raw: Optional[str]) -> Optional[List[int]]:
@@ -112,6 +113,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tokenizer-path", type=str, default=TOKENIZER_PATH, help="Tokenizer path for AutoTokenizer.")
     parser.add_argument("--device", type=str, default=DEVICE, help="Device to run on (e.g., cuda, cpu).")
     parser.add_argument("--dtype", type=str, default="float16" if DTYPE == torch.float16 else "float32", choices=["float16", "float32"], help="Model dtype.")
+    parser.add_argument("--no-plots", action="store_true", help="Disable heatmap PNG generation and only write JSON outputs.")
     return parser
 
 
@@ -130,7 +132,7 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         # BASE := original/source trace, SOURCE := counterfactual trace.
         base_token_ids = source_block.get("tokens") if isinstance(source_block.get("tokens"), list) else []
         source_token_ids = cf_block.get("tokens") if isinstance(cf_block.get("tokens"), list) else []
-        source_text = source_block.get("text", "")
+        source_text = source_block.get("generated_text", "")
         if not base_token_ids or not source_token_ids:
             continue
 
@@ -156,21 +158,67 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
                     continue
                 # Check if value's source span starts in CoT region
                 source_span = mv.get("source", {})
-                span_start = source_span.get("span", {}).get("start")
+                span_start = source_span.get("span_start")
+                if span_start is None:
+                    span_start = source_span.get("span", {}).get("start")
                 if span_start is not None and span_start >= cot_start_pos:
                     cot_values.append(mv)
 
         # Sort in reverse order by span start position (final answer first)
-        cot_values.sort(key=lambda x: x.get("source", {}).get("span", {}).get("start", 0), reverse=True)
+        def _mv_span_start(mv: Dict) -> int:
+            src = mv.get("source", {})
+            val = src.get("span_start")
+            if val is None:
+                val = src.get("span", {}).get("start", 0)
+            return int(val) if isinstance(val, int) else 0
+
+        cot_values.sort(key=_mv_span_start, reverse=True)
 
         if cot_values:
             for v_idx, mv in enumerate(cot_values):
                 pos = mv.get("position")
-                source_tok = mv.get("source", {}).get("token_start")
-                base_tok = mv.get("counterfactual", {}).get("token_start")
-                if not isinstance(source_tok, int) or not isinstance(base_tok, int):
+                src_meta = mv.get("source", {})
+                cf_meta = mv.get("counterfactual", {})
+
+                src_tok_start = src_meta.get("token_start")
+                src_tok_end = src_meta.get("token_end")
+                cf_tok_start = cf_meta.get("token_start")
+                cf_tok_end = cf_meta.get("token_end")
+
+                if not isinstance(src_tok_start, int) or not isinstance(cf_tok_start, int):
                     continue
-                trunc_idx = min(source_tok, base_tok)
+
+                # BASE sequence comes from original/source block.
+                # SOURCE sequence comes from counterfactual block.
+                base_tok = src_tok_start
+                source_tok = cf_tok_start
+
+                # Prefer scoring the first differing token inside the matched numeric span.
+                if isinstance(src_tok_end, int) and isinstance(cf_tok_end, int):
+                    span_start = max(0, min(source_tok, base_tok))
+                    span_end = min(len(source_token_ids), len(base_token_ids), src_tok_end, cf_tok_end)
+                else:
+                    span_start = max(0, min(source_tok, base_tok))
+                    span_end = span_start + 1
+
+                trunc_idx = span_start
+                found_diff = False
+                for t in range(span_start, span_end):
+                    if source_token_ids[t] != base_token_ids[t]:
+                        trunc_idx = t
+                        found_diff = True
+                        break
+
+                # If span tokens are identical (rare, due to formatting/padding),
+                # advance to the next differing token in the remaining sequence.
+                if not found_diff:
+                    usable_len = min(len(source_token_ids), len(base_token_ids))
+                    for t in range(span_end, usable_len):
+                        if source_token_ids[t] != base_token_ids[t]:
+                            trunc_idx = t
+                            found_diff = True
+                            break
+
                 if trunc_idx <= 0:
                     continue
                 if trunc_idx >= len(source_token_ids) or trunc_idx >= len(base_token_ids):
@@ -398,6 +446,7 @@ def main():
     global TOKENIZER_PATH
     global DEVICE
     global DTYPE
+    global SAVE_PLOTS
 
     args = build_arg_parser().parse_args()
     INPUT_JSON = args.input_json
@@ -413,6 +462,7 @@ def main():
     TOKENIZER_PATH = args.tokenizer_path
     DEVICE = args.device
     DTYPE = torch.float16 if args.dtype == "float16" else torch.float32
+    SAVE_PLOTS = not args.no_plots
 
     print("\n" + "=" * 100)
     print("ACTIVATION PATCHING ENGINE")
@@ -426,6 +476,7 @@ def main():
     print(f"  Layers to patch: {LAYERS_TO_PATCH if LAYERS_TO_PATCH else 'all'}")
     print(f"  Token positions to patch: {TOKEN_POSITIONS_TO_PATCH if TOKEN_POSITIONS_TO_PATCH else 'all'}")
     print(f"  Device: {DEVICE}, Dtype: {DTYPE}")
+    print(f"  Save plots: {SAVE_PLOTS}")
 
     model, tokenizer = load_model_and_tokenizer()
     _ = tokenizer
@@ -566,6 +617,10 @@ def main():
         shared_vmax = float(all_abs.max()) if all_abs.size > 0 else 1.0
         if shared_vmax <= 0:
             shared_vmax = 1.0
+        diff_abs = np.abs(diff_delta_matrix[np.isfinite(diff_delta_matrix)])
+        diff_vmax = float(diff_abs.max()) if diff_abs.size > 0 else 1.0
+        if diff_vmax <= 0:
+            diff_vmax = 1.0
 
         source_title = (
             f"{exp_id} | pair {pair_id} | type {exp_type} | trunc {trunc_idx}\n"
@@ -580,33 +635,34 @@ def main():
             f"DIFF delta: source - base at token@{scored_token_index}"
         )
 
-        plot_single_heatmap(
-            matrix=source_delta_matrix,
-            title=source_title,
-            out_png=source_heatmap_png,
-            x_labels=x_tick_labels,
-            layer_indices=layer_indices,
-            cbar_label="Delta log P(source token)",
-            vmax=shared_vmax,
-        )
-        plot_single_heatmap(
-            matrix=base_delta_matrix,
-            title=base_title,
-            out_png=base_heatmap_png,
-            x_labels=x_tick_labels,
-            layer_indices=layer_indices,
-            cbar_label="Delta log P(base token)",
-            vmax=shared_vmax,
-        )
-        plot_single_heatmap(
-            matrix=diff_delta_matrix,
-            title=diff_title,
-            out_png=diff_heatmap_png,
-            x_labels=x_tick_labels,
-            layer_indices=layer_indices,
-            cbar_label="Delta log P(source token) - Delta log P(base token)",
-            vmax=shared_vmax,
-        )
+        if SAVE_PLOTS:
+            plot_single_heatmap(
+                matrix=source_delta_matrix,
+                title=source_title,
+                out_png=source_heatmap_png,
+                x_labels=x_tick_labels,
+                layer_indices=layer_indices,
+                cbar_label="Delta log P(source token)",
+                vmax=shared_vmax,
+            )
+            plot_single_heatmap(
+                matrix=base_delta_matrix,
+                title=base_title,
+                out_png=base_heatmap_png,
+                x_labels=x_tick_labels,
+                layer_indices=layer_indices,
+                cbar_label="Delta log P(base token)",
+                vmax=shared_vmax,
+            )
+            plot_single_heatmap(
+                matrix=diff_delta_matrix,
+                title=diff_title,
+                out_png=diff_heatmap_png,
+                x_labels=x_tick_labels,
+                layer_indices=layer_indices,
+                cbar_label="Delta log P(source token) - Delta log P(base token)",
+                vmax=diff_vmax,
+            )
 
         matrix_payload = {
             "experiment_id": exp_id,
@@ -652,18 +708,19 @@ def main():
                 "value_index": value_index,
                 "experiment_type": exp_type,
                 "truncation_token_index": trunc_idx,
-                "source_heatmap_png": str(source_heatmap_png),
-                "base_heatmap_png": str(base_heatmap_png),
-                "diff_heatmap_png": str(diff_heatmap_png),
+                "source_heatmap_png": str(source_heatmap_png) if SAVE_PLOTS else None,
+                "base_heatmap_png": str(base_heatmap_png) if SAVE_PLOTS else None,
+                "diff_heatmap_png": str(diff_heatmap_png) if SAVE_PLOTS else None,
                 "pair_json": str(pair_json),
                 "usable_len": usable_len,
                 "n_layers": len(layer_indices),
                 "n_positions": len(pos_indices),
             }
         )
-        print(f"    Saved: {source_heatmap_png}")
-        print(f"    Saved: {base_heatmap_png}")
-        print(f"    Saved: {diff_heatmap_png}")
+        if SAVE_PLOTS:
+            print(f"    Saved: {source_heatmap_png}")
+            print(f"    Saved: {base_heatmap_png}")
+            print(f"    Saved: {diff_heatmap_png}")
 
     for pair_key, payload in pair_merged_payloads.items():
         pair_dir = OUTPUT_ROOT_DIR / pair_key
