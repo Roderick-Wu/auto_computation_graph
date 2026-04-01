@@ -38,7 +38,7 @@ echo "Running patching on experiment: $EXPERIMENT"
 echo "Input: $INPUT_JSON"
 echo "Output: $OUTPUT_ROOT_DIR"
 
-python intervene_graph.py \
+python -u intervene_graph.py \
   --input-json "$INPUT_JSON" \
   --output-root-dir "$OUTPUT_ROOT_DIR" \
   --device cuda \

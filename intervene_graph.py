@@ -701,6 +701,15 @@ def main():
             }
         pair_merged_payloads[pair_key]["entries"].append(matrix_payload)
 
+        # Flush per-pair JSON incrementally so partial/interrupted runs still
+        # leave usable pair-level data artifacts on disk.
+        running_payload = pair_merged_payloads[pair_key]
+        running_entries = running_payload.get("entries", [])
+        running_entries.sort(key=lambda x: x.get("truncation_token_index", 0), reverse=True)
+        running_payload["n_entries"] = len(running_entries)
+        with open(pair_json, "w") as f:
+            json.dump(running_payload, f, indent=2)
+
         run_records.append(
             {
                 "experiment_id": exp_id,
