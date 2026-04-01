@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=patch_graph
-#SBATCH --time=0-8:00:00 # D-HH:MM
+#SBATCH --time=0-48:00:00 # D-HH:MM
 #SBATCH --account=def-rgrosse
-#SBATCH --mem=256G
+#SBATCH --mem=128G
 #SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=1
 
@@ -42,5 +42,6 @@ python -u intervene_graph.py \
   --input-json "$INPUT_JSON" \
   --output-root-dir "$OUTPUT_ROOT_DIR" \
   --device cuda \
-  --dtype float16
+  --dtype float16 \
+  --no-plots
 

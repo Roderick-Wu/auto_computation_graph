@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from transformers import AutoTokenizer
 
 
-NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\w]|\.\d)")
+NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\d_]|,\d|\.\d)")
 
 
 def resolve_default_input_json(model_name: str, experiment: str) -> Path:
@@ -214,7 +214,8 @@ def pad_value_to_target_length(value_text: str, other_value_text: str, target_le
     if "." in value_text:
         return value_text + ("0" * missing)
 
-    out = value_text + "."
+    # Never leave a bare trailing decimal point; use at least ".0".
+    out = value_text + ".0"
     zeros_needed = target_len - len(out)
     if zeros_needed < 0:
         zeros_needed = 0
@@ -260,6 +261,15 @@ def rewrite_pair_by_matched_lengths(source_text: str, cf_text: str) -> Tuple[str
             cf_for_pad = cf_num + ".0"
 
         target_len = max(len(src_for_pad), len(cf_for_pad))
+
+        # If an integer would only gain a single character, the old logic could
+        # produce a bare trailing dot (e.g., "353250."). Promote the target
+        # length by one so both sides can use ".0" style formatting.
+        src_needs_single_char = "." not in src_for_pad and (target_len - len(src_for_pad) == 1)
+        cf_needs_single_char = "." not in cf_for_pad and (target_len - len(cf_for_pad) == 1)
+        if src_needs_single_char or cf_needs_single_char:
+            target_len += 1
+
         new_src_num = pad_value_to_target_length(src_for_pad, cf_for_pad, target_len)
         new_cf_num = pad_value_to_target_length(cf_for_pad, src_for_pad, target_len)
 
@@ -324,6 +334,10 @@ def main() -> None:
     input_json = args.input_json or resolve_default_input_json(args.model_name, args.experiment)
     output_json = args.output_json or resolve_default_output_json(args.model_name, args.experiment)
     tokenizer_path = args.tokenizer_path or resolve_default_tokenizer_path(repo_root, args.model_name)
+
+    if output_json.exists():
+        print(f"Output JSON already exists at {output_json}, exiting to avoid overwrite.")
+        return
 
     if not input_json.exists():
         raise FileNotFoundError(f"Input paired traces not found: {input_json}")

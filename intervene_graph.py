@@ -128,12 +128,19 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         source_block = pair.get("pair", {}).get("source", {})
         cf_block = pair.get("pair", {}).get("counterfactual", {})
 
+        # Skip pairs that post-processing flagged as tokenization/alignment failures.
+        token_counts_equal = pair.get("post_process", {}).get("token_counts_equal")
+        if token_counts_equal is False:
+            continue
+
         # Terminology normalization: patch SOURCE onto BASE.
         # BASE := original/source trace, SOURCE := counterfactual trace.
         base_token_ids = source_block.get("tokens") if isinstance(source_block.get("tokens"), list) else []
         source_token_ids = cf_block.get("tokens") if isinstance(cf_block.get("tokens"), list) else []
         source_text = source_block.get("generated_text", "")
         if not base_token_ids or not source_token_ids:
+            continue
+        if len(base_token_ids) != len(source_token_ids):
             continue
 
         # Find where the CoT starts ("Answer (step-by-step)")

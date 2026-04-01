@@ -458,6 +458,11 @@ def main() -> None:
     output_json = args.output_json or resolve_default_output_json(args.model_name, args.experiment)
     tokenizer_path = args.tokenizer_path or resolve_default_tokenizer_path(args.model_name)
 
+    # exit if json already there
+    if output_json.exists():
+        print(f"Output JSON already exists at {output_json}, exiting to avoid overwrite.")
+        return
+
     if not args.skip_api and not args.api_url:
         raise ValueError("API URL is required unless --skip-api is set. Use --api-url or OPENAI_ENDPOINT.")
 
