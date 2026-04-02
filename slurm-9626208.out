@@ -1,0 +1,1455 @@
+Running patching on experiment: cross_section
+Input: /home/wuroderi/links/scratch/traces/Qwen2.5-32B/cross_section/aligned_pairs.json
+Output: /home/wuroderi/links/scratch/traces/Qwen2.5-32B/cross_section/patch_runs
+
+====================================================================================================
+ACTIVATION PATCHING ENGINE
+====================================================================================================
+
+Configuration:
+  Input JSON: /home/wuroderi/links/scratch/traces/Qwen2.5-32B/cross_section/aligned_pairs.json
+  Output root dir: /home/wuroderi/links/scratch/traces/Qwen2.5-32B/cross_section/patch_runs
+  Summary JSON: /home/wuroderi/links/scratch/traces/Qwen2.5-32B/cross_section/patch_runs/patching_summary.json
+  Experiment IDs filter: none
+  Layers to patch: all
+  Token positions to patch: all
+  Device: cuda, Dtype: torch.float16
+  Save plots: False
+Loading model from /home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Qwen2.5-32B...
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/771 [00:00<?, ?it/s]Loading weights:   0%|          | 1/771 [00:00<06:02,  2.12it/s]Loading weights:   0%|          | 2/771 [00:00<03:50,  3.33it/s]Loading weights:   1%|          | 9/771 [00:00<00:54, 14.05it/s]Loading weights:   1%|▏         | 11/771 [00:01<01:53,  6.69it/s]Loading weights:   2%|▏         | 13/771 [00:01<01:54,  6.65it/s]Loading weights:   2%|▏         | 14/771 [00:02<03:35,  3.51it/s]Loading weights:   2%|▏         | 16/771 [00:03<03:10,  3.97it/s]Loading weights:   2%|▏         | 18/771 [00:05<06:08,  2.04it/s]Loading weights:   4%|▎         | 28/771 [00:05<02:02,  6.05it/s]Loading weights:   4%|▍         | 30/771 [00:07<04:11,  2.95it/s]Loading weights:   5%|▌         | 40/771 [00:08<02:28,  4.92it/s]Loading weights:   5%|▌         | 42/771 [00:11<03:56,  3.08it/s]Loading weights:   7%|▋         | 52/771 [00:11<02:32,  4.72it/s]Loading weights:   7%|▋         | 54/771 [00:13<03:21,  3.57it/s]Loading weights:   8%|▊         | 64/771 [00:17<03:42,  3.18it/s]Loading weights:   9%|▊         | 66/771 [00:17<03:22,  3.49it/s]Loading weights:  10%|▉         | 77/771 [00:18<02:07,  5.44it/s]Loading weights:  10%|█         | 78/771 [00:20<03:51,  2.99it/s]Loading weights:  12%|█▏        | 90/771 [00:21<02:03,  5.51it/s]Loading weights:  12%|█▏        | 94/771 [00:21<02:07,  5.30it/s]Loading weights:  13%|█▎        | 100/771 [00:25<03:20,  3.35it/s]Loading weights:  13%|█▎        | 102/771 [00:27<04:01,  2.77it/s]Loading weights:  15%|█▍        | 112/771 [00:27<02:13,  4.94it/s]Loading weights:  15%|█▍        | 114/771 [00:29<03:21,  3.26it/s]Loading weights:  16%|█▌        | 124/771 [00:29<01:59,  5.43it/s]Loading weights:  16%|█▋        | 126/771 [00:31<03:03,  3.52it/s]Loading weights:  18%|█▊        | 136/771 [00:32<01:56,  5.47it/s]Loading weights:  18%|█▊        | 138/771 [00:34<03:11,  3.31it/s]Loading weights:  19%|█▉        | 148/771 [00:35<02:07,  4.87it/s]Loading weights:  19%|█▉        | 150/771 [00:37<02:46,  3.72it/s]Loading weights:  21%|██        | 160/771 [00:38<02:11,  4.64it/s]Loading weights:  21%|██        | 162/771 [00:40<02:59,  3.40it/s]Loading weights:  22%|██▏       | 172/771 [00:43<02:50,  3.52it/s]Loading weights:  24%|██▍       | 184/771 [00:43<01:44,  5.61it/s]Loading weights:  24%|██▍       | 186/771 [00:46<02:34,  3.78it/s]Loading weights:  25%|██▌       | 196/771 [00:46<01:43,  5.57it/s]Loading weights:  26%|██▌       | 198/771 [00:46<01:38,  5.84it/s]Loading weights:  26%|██▋       | 204/771 [00:47<01:35,  5.94it/s]Loading weights:  27%|██▋       | 208/771 [00:51<03:10,  2.95it/s]Loading weights:  27%|██▋       | 209/771 [00:52<03:32,  2.64it/s]Loading weights:  29%|██▉       | 222/771 [00:54<02:24,  3.79it/s]Loading weights:  30%|███       | 232/771 [00:55<01:41,  5.32it/s]Loading weights:  30%|███       | 234/771 [00:55<01:34,  5.70it/s]Loading weights:  32%|███▏      | 244/771 [00:58<01:56,  4.54it/s]Loading weights:  33%|███▎      | 254/771 [00:58<01:16,  6.78it/s]Loading weights:  33%|███▎      | 256/771 [01:02<02:57,  2.90it/s]Loading weights:  33%|███▎      | 258/771 [01:03<03:05,  2.77it/s]Loading weights:  35%|███▍      | 268/771 [01:03<01:39,  5.03it/s]Loading weights:  35%|███▌      | 272/771 [01:04<01:30,  5.52it/s]Loading weights:  36%|███▋      | 280/771 [01:07<02:10,  3.77it/s]Loading weights:  37%|███▋      | 282/771 [01:09<02:52,  2.83it/s]Loading weights:  38%|███▊      | 292/771 [01:10<01:52,  4.27it/s]Loading weights:  38%|███▊      | 294/771 [01:10<01:41,  4.68it/s]Loading weights:  39%|███▉      | 300/771 [01:11<01:30,  5.20it/s]Loading weights:  39%|███▉      | 304/771 [01:13<02:08,  3.64it/s]Loading weights:  40%|███▉      | 305/771 [01:18<04:51,  1.60it/s]Loading weights:  41%|████      | 316/771 [01:19<02:18,  3.30it/s]Loading weights:  41%|████      | 318/771 [01:22<03:27,  2.18it/s]Loading weights:  43%|████▎     | 329/771 [01:22<01:49,  4.03it/s]Loading weights:  44%|████▎     | 336/771 [01:24<01:58,  3.66it/s]Loading weights:  44%|████▍     | 340/771 [01:26<02:12,  3.26it/s]Loading weights:  44%|████▍     | 342/771 [01:27<02:11,  3.26it/s]Loading weights:  46%|████▌     | 352/771 [01:29<01:55,  3.64it/s]Loading weights:  46%|████▌     | 353/771 [01:31<02:38,  2.64it/s]Loading weights:  47%|████▋     | 364/771 [01:31<01:23,  4.87it/s]Loading weights:  47%|████▋     | 366/771 [01:32<01:29,  4.52it/s]Loading weights:  49%|████▉     | 376/771 [01:35<01:33,  4.22it/s]Loading weights:  49%|████▉     | 378/771 [01:37<02:11,  2.98it/s]Loading weights:  50%|█████     | 388/771 [01:37<01:22,  4.62it/s]Loading weights:  52%|█████▏    | 398/771 [01:38<00:53,  6.94it/s]Loading weights:  52%|█████▏    | 400/771 [01:41<01:43,  3.59it/s]Loading weights:  52%|█████▏    | 402/771 [01:42<01:56,  3.17it/s]Loading weights:  53%|█████▎    | 412/771 [01:43<01:15,  4.73it/s]Loading weights:  54%|█████▎    | 414/771 [01:45<02:01,  2.93it/s]Loading weights:  55%|█████▍    | 424/771 [01:47<01:22,  4.21it/s]Loading weights:  55%|█████▌    | 425/771 [01:49<02:06,  2.73it/s]Loading weights:  55%|█████▌    | 426/771 [01:50<02:16,  2.52it/s]Loading weights:  57%|█████▋    | 436/771 [01:50<01:10,  4.75it/s]Loading weights:  57%|█████▋    | 438/771 [01:50<01:06,  5.02it/s]Loading weights:  57%|█████▋    | 442/771 [01:51<00:57,  5.71it/s]Loading weights:  58%|█████▊    | 446/771 [01:53<01:23,  3.88it/s]Loading weights:  58%|█████▊    | 448/771 [01:53<01:26,  3.75it/s]Loading weights:  58%|█████▊    | 450/771 [01:55<02:10,  2.47it/s]Loading weights:  60%|█████▉    | 460/771 [01:56<01:00,  5.18it/s]Loading weights:  60%|█████▉    | 462/771 [01:58<01:37,  3.16it/s]Loading weights:  61%|██████    | 472/771 [01:59<01:01,  4.83it/s]Loading weights:  61%|██████▏   | 474/771 [01:59<00:56,  5.24it/s]Loading weights:  63%|██████▎   | 482/771 [01:59<00:34,  8.32it/s]Loading weights:  63%|██████▎   | 485/771 [02:03<01:29,  3.18it/s]Loading weights:  64%|██████▍   | 496/771 [02:05<01:06,  4.13it/s]Loading weights:  65%|██████▍   | 498/771 [02:07<01:30,  3.01it/s]Loading weights:  66%|██████▌   | 508/771 [02:07<00:53,  4.89it/s]Loading weights:  66%|██████▌   | 510/771 [02:09<01:20,  3.26it/s]Loading weights:  67%|██████▋   | 520/771 [02:10<00:52,  4.79it/s]Loading weights:  68%|██████▊   | 521/771 [02:12<01:12,  3.47it/s]Loading weights:  69%|██████▉   | 532/771 [02:13<00:51,  4.60it/s]Loading weights:  69%|██████▉   | 534/771 [02:15<01:13,  3.24it/s]Loading weights:  71%|███████   | 544/771 [02:16<00:48,  4.68it/s]Loading weights:  71%|███████   | 546/771 [02:17<00:56,  3.98it/s]Loading weights:  72%|███████▏  | 556/771 [02:19<00:41,  5.22it/s]Loading weights:  74%|███████▎  | 568/771 [02:21<00:42,  4.77it/s]Loading weights:  75%|███████▌  | 580/771 [02:24<00:43,  4.39it/s]Loading weights:  77%|███████▋  | 592/771 [02:27<00:42,  4.22it/s]Loading weights:  77%|███████▋  | 594/771 [02:29<00:47,  3.70it/s]Loading weights:  78%|███████▊  | 604/771 [02:29<00:31,  5.36it/s]Loading weights:  79%|███████▊  | 606/771 [02:34<01:06,  2.49it/s]Loading weights:  80%|████████  | 617/771 [02:34<00:36,  4.20it/s]Loading weights:  81%|████████  | 621/771 [02:34<00:30,  4.96it/s]Loading weights:  81%|████████  | 624/771 [02:35<00:30,  4.77it/s]Loading weights:  81%|████████▏ | 627/771 [02:37<00:42,  3.43it/s]Loading weights:  82%|████████▏ | 629/771 [02:38<00:44,  3.18it/s]Loading weights:  82%|████████▏ | 636/771 [02:39<00:32,  4.19it/s]Loading weights:  83%|████████▎ | 640/771 [02:43<00:55,  2.38it/s]Loading weights:  83%|████████▎ | 641/771 [02:44<01:00,  2.16it/s]Loading weights:  85%|████████▍ | 653/771 [02:44<00:23,  5.13it/s]Loading weights:  85%|████████▌ | 657/771 [02:44<00:19,  5.84it/s]Loading weights:  86%|████████▌ | 660/771 [02:45<00:20,  5.54it/s]Loading weights:  86%|████████▌ | 664/771 [02:47<00:30,  3.49it/s]Loading weights:  88%|████████▊ | 676/771 [02:50<00:26,  3.65it/s]Loading weights:  88%|████████▊ | 678/771 [02:53<00:34,  2.72it/s]Loading weights:  89%|████████▉ | 688/771 [02:53<00:19,  4.16it/s]Loading weights:  89%|████████▉ | 690/771 [02:55<00:24,  3.26it/s]Loading weights:  91%|█████████ | 700/771 [02:56<00:15,  4.65it/s]Loading weights:  92%|█████████▏| 712/771 [02:59<00:14,  4.04it/s]Loading weights:  94%|█████████▎| 722/771 [03:00<00:09,  5.18it/s]Loading weights:  94%|█████████▍| 724/771 [03:02<00:12,  3.71it/s]Loading weights:  94%|█████████▍| 725/771 [03:05<00:18,  2.50it/s]Loading weights:  95%|█████████▌| 736/771 [03:06<00:08,  3.95it/s]Loading weights:  96%|█████████▌| 738/771 [03:08<00:10,  3.11it/s]Loading weights:  97%|█████████▋| 748/771 [03:08<00:04,  4.88it/s]Loading weights:  99%|█████████▊| 760/771 [03:11<00:02,  4.47it/s]Loading weights: 100%|██████████| 771/771 [03:11<00:00,  4.02it/s]
+  Model device: cuda:0
+  Model dtype: torch.float16
+  Resolved transformer layers: 64
+
+Loading experiments from /home/wuroderi/links/scratch/traces/Qwen2.5-32B/cross_section/aligned_pairs.json...
+Loaded 680 experiments
+Running 680 experiments...
+
+  [0] pair0_v0 | Pair 0, Type value_match, Truncation 121
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 121
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [1] pair0_v1 | Pair 0, Type value_match, Truncation 113
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 113
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [2] pair0_v2 | Pair 0, Type value_match, Truncation 98
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 98
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [3] pair0_v3 | Pair 0, Type value_match, Truncation 94
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 94
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [4] pair0_v4 | Pair 0, Type value_match, Truncation 89
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 89
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [5] pair0_v5 | Pair 0, Type value_match, Truncation 74
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 74
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [6] pair0_v6 | Pair 0, Type value_match, Truncation 71
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 71
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [7] pair0_v7 | Pair 0, Type value_match, Truncation 67
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 67
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [8] pair0_v8 | Pair 0, Type value_match, Truncation 60
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 60
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [9] pair0_v9 | Pair 0, Type value_match, Truncation 60
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 60
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [10] pair0_v10 | Pair 0, Type value_match, Truncation 55
+    SOURCE/TARGET usable length: 129
+    Layers patched: 64 | Positions patched: 55
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [11] pair1_v0 | Pair 1, Type value_match, Truncation 215
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 215
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [12] pair1_v1 | Pair 1, Type value_match, Truncation 205
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 205
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [13] pair1_v2 | Pair 1, Type value_match, Truncation 205
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 205
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [14] pair1_v3 | Pair 1, Type value_match, Truncation 205
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 205
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [15] pair1_v4 | Pair 1, Type value_match, Truncation 185
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 185
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [16] pair1_v5 | Pair 1, Type value_match, Truncation 180
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 180
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [17] pair1_v6 | Pair 1, Type value_match, Truncation 180
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 180
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [18] pair1_v7 | Pair 1, Type value_match, Truncation 167
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 167
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [19] pair1_v8 | Pair 1, Type value_match, Truncation 155
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 155
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [20] pair1_v9 | Pair 1, Type value_match, Truncation 155
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 155
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [21] pair1_v10 | Pair 1, Type value_match, Truncation 155
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 155
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [22] pair1_v11 | Pair 1, Type value_match, Truncation 128
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 128
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [23] pair1_v12 | Pair 1, Type value_match, Truncation 122
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 122
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [24] pair1_v13 | Pair 1, Type value_match, Truncation 122
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 122
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [25] pair1_v14 | Pair 1, Type value_match, Truncation 113
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 113
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [26] pair1_v15 | Pair 1, Type value_match, Truncation 113
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 113
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [27] pair1_v16 | Pair 1, Type value_match, Truncation 113
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 113
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [28] pair1_v17 | Pair 1, Type value_match, Truncation 113
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 113
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [29] pair1_v18 | Pair 1, Type value_match, Truncation 80
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 80
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [30] pair1_v19 | Pair 1, Type value_match, Truncation 80
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 80
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [31] pair1_v20 | Pair 1, Type value_match, Truncation 71
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 71
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [32] pair1_v21 | Pair 1, Type value_match, Truncation 71
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 71
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [33] pair1_v22 | Pair 1, Type value_match, Truncation 71
+    SOURCE/TARGET usable length: 217
+    Layers patched: 64 | Positions patched: 71
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [34] pair2_v0 | Pair 2, Type value_match, Truncation 123
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 123
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [35] pair2_v1 | Pair 2, Type value_match, Truncation 108
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 108
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [36] pair2_v2 | Pair 2, Type value_match, Truncation 104
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 104
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [37] pair2_v3 | Pair 2, Type value_match, Truncation 98
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 98
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [38] pair2_v4 | Pair 2, Type value_match, Truncation 90
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 90
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [39] pair2_v5 | Pair 2, Type value_match, Truncation 85
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 85
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [40] pair2_v6 | Pair 2, Type value_match, Truncation 68
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 68
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [41] pair2_v7 | Pair 2, Type value_match, Truncation 68
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 68
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [42] pair2_v8 | Pair 2, Type value_match, Truncation 60
+    SOURCE/TARGET usable length: 132
+    Layers patched: 64 | Positions patched: 60
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [43] pair3_v0 | Pair 3, Type value_match, Truncation 162
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 162
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [44] pair3_v1 | Pair 3, Type value_match, Truncation 147
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 147
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [45] pair3_v2 | Pair 3, Type value_match, Truncation 142
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 142
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [46] pair3_v3 | Pair 3, Type value_match, Truncation 130
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 130
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [47] pair3_v4 | Pair 3, Type value_match, Truncation 118
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 118
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [48] pair3_v5 | Pair 3, Type value_match, Truncation 112
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 112
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [49] pair3_v6 | Pair 3, Type value_match, Truncation 112
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 112
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [50] pair3_v7 | Pair 3, Type value_match, Truncation 101
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 101
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [51] pair3_v8 | Pair 3, Type value_match, Truncation 101
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 101
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [52] pair3_v9 | Pair 3, Type value_match, Truncation 90
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 90
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [53] pair3_v10 | Pair 3, Type value_match, Truncation 90
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 90
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [54] pair3_v11 | Pair 3, Type value_match, Truncation 90
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 90
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [55] pair3_v12 | Pair 3, Type value_match, Truncation 74
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 74
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [56] pair3_v13 | Pair 3, Type value_match, Truncation 74
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 74
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [57] pair3_v14 | Pair 3, Type value_match, Truncation 64
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 64
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [58] pair3_v15 | Pair 3, Type value_match, Truncation 57
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 57
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [59] pair3_v16 | Pair 3, Type value_match, Truncation 50
+    SOURCE/TARGET usable length: 171
+    Layers patched: 64 | Positions patched: 50
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [60] pair4_v0 | Pair 4, Type value_match, Truncation 126
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 126
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [61] pair4_v1 | Pair 4, Type value_match, Truncation 113
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 113
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [62] pair4_v2 | Pair 4, Type value_match, Truncation 108
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 108
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [63] pair4_v3 | Pair 4, Type value_match, Truncation 103
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 103
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [64] pair4_v4 | Pair 4, Type value_match, Truncation 90
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 90
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [65] pair4_v5 | Pair 4, Type value_match, Truncation 90
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 90
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [66] pair4_v6 | Pair 4, Type value_match, Truncation 82
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 82
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [67] pair4_v7 | Pair 4, Type value_match, Truncation 68
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 68
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [68] pair4_v8 | Pair 4, Type value_match, Truncation 64
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 64
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [69] pair4_v9 | Pair 4, Type value_match, Truncation 60
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 60
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [70] pair4_v10 | Pair 4, Type value_match, Truncation 53
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 53
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [71] pair4_v11 | Pair 4, Type value_match, Truncation 48
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 48
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [72] pair5_v0 | Pair 5, Type value_match, Truncation 128
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 128
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [73] pair5_v1 | Pair 5, Type value_match, Truncation 111
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 111
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [74] pair5_v2 | Pair 5, Type value_match, Truncation 106
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 106
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [75] pair5_v3 | Pair 5, Type value_match, Truncation 106
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 106
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [76] pair5_v4 | Pair 5, Type value_match, Truncation 96
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 96
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [77] pair5_v5 | Pair 5, Type value_match, Truncation 96
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 96
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [78] pair5_v6 | Pair 5, Type value_match, Truncation 96
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 96
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [79] pair5_v7 | Pair 5, Type value_match, Truncation 73
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 73
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [80] pair5_v8 | Pair 5, Type value_match, Truncation 68
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 68
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [81] pair5_v9 | Pair 5, Type value_match, Truncation 65
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 65
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [82] pair5_v10 | Pair 5, Type value_match, Truncation 59
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 59
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [83] pair5_v11 | Pair 5, Type value_match, Truncation 56
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 56
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [84] pair5_v12 | Pair 5, Type value_match, Truncation 56
+    SOURCE/TARGET usable length: 138
+    Layers patched: 64 | Positions patched: 56
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [85] pair6_v0 | Pair 6, Type value_match, Truncation 139
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 139
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [86] pair6_v1 | Pair 6, Type value_match, Truncation 125
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 125
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [87] pair6_v2 | Pair 6, Type value_match, Truncation 115
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 115
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [88] pair6_v3 | Pair 6, Type value_match, Truncation 105
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 105
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [89] pair6_v4 | Pair 6, Type value_match, Truncation 95
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 95
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [90] pair6_v5 | Pair 6, Type value_match, Truncation 95
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 95
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [91] pair6_v6 | Pair 6, Type value_match, Truncation 85
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 85
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [92] pair6_v7 | Pair 6, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [93] pair6_v8 | Pair 6, Type value_match, Truncation 67
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 67
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [94] pair6_v9 | Pair 6, Type value_match, Truncation 62
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 62
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [95] pair6_v10 | Pair 6, Type value_match, Truncation 58
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 58
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [96] pair6_v11 | Pair 6, Type value_match, Truncation 51
+    SOURCE/TARGET usable length: 145
+    Layers patched: 64 | Positions patched: 51
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [97] pair7_v0 | Pair 7, Type value_match, Truncation 157
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 157
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [98] pair7_v1 | Pair 7, Type value_match, Truncation 149
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 149
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [99] pair7_v2 | Pair 7, Type value_match, Truncation 131
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 131
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [100] pair7_v3 | Pair 7, Type value_match, Truncation 118
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 118
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [101] pair7_v4 | Pair 7, Type value_match, Truncation 114
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 114
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [102] pair7_v5 | Pair 7, Type value_match, Truncation 105
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 105
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [103] pair7_v6 | Pair 7, Type value_match, Truncation 94
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 94
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [104] pair7_v7 | Pair 7, Type value_match, Truncation 88
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 88
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [105] pair7_v8 | Pair 7, Type value_match, Truncation 80
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 80
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [106] pair7_v9 | Pair 7, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [107] pair7_v10 | Pair 7, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [108] pair7_v11 | Pair 7, Type value_match, Truncation 58
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 58
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [109] pair7_v12 | Pair 7, Type value_match, Truncation 52
+    SOURCE/TARGET usable length: 166
+    Layers patched: 64 | Positions patched: 52
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [110] pair8_v0 | Pair 8, Type value_match, Truncation 147
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 147
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [111] pair8_v1 | Pair 8, Type value_match, Truncation 131
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 131
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [112] pair8_v2 | Pair 8, Type value_match, Truncation 126
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 126
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [113] pair8_v3 | Pair 8, Type value_match, Truncation 118
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 118
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [114] pair8_v4 | Pair 8, Type value_match, Truncation 103
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 103
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [115] pair8_v5 | Pair 8, Type value_match, Truncation 103
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 103
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [116] pair8_v6 | Pair 8, Type value_match, Truncation 94
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 94
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [117] pair8_v7 | Pair 8, Type value_match, Truncation 94
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 94
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [118] pair8_v8 | Pair 8, Type value_match, Truncation 76
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 76
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [119] pair8_v9 | Pair 8, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [120] pair8_v10 | Pair 8, Type value_match, Truncation 66
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 66
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [121] pair8_v11 | Pair 8, Type value_match, Truncation 57
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 57
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [122] pair8_v12 | Pair 8, Type value_match, Truncation 52
+    SOURCE/TARGET usable length: 157
+    Layers patched: 64 | Positions patched: 52
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [123] pair10_v0 | Pair 10, Type value_match, Truncation 127
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 127
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [124] pair10_v1 | Pair 10, Type value_match, Truncation 112
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 112
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [125] pair10_v2 | Pair 10, Type value_match, Truncation 106
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 106
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [126] pair10_v3 | Pair 10, Type value_match, Truncation 106
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 106
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [127] pair10_v4 | Pair 10, Type value_match, Truncation 101
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 101
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [128] pair10_v5 | Pair 10, Type value_match, Truncation 101
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 101
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [129] pair10_v6 | Pair 10, Type value_match, Truncation 101
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 101
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [130] pair10_v7 | Pair 10, Type value_match, Truncation 69
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 69
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [131] pair10_v8 | Pair 10, Type value_match, Truncation 61
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 61
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [132] pair10_v9 | Pair 10, Type value_match, Truncation 47
+    SOURCE/TARGET usable length: 135
+    Layers patched: 64 | Positions patched: 47
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [133] pair11_v0 | Pair 11, Type value_match, Truncation 111
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 111
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [134] pair11_v1 | Pair 11, Type value_match, Truncation 94
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 94
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [135] pair11_v2 | Pair 11, Type value_match, Truncation 91
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 91
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [136] pair11_v3 | Pair 11, Type value_match, Truncation 82
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 82
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [137] pair11_v4 | Pair 11, Type value_match, Truncation 62
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 62
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [138] pair11_v5 | Pair 11, Type value_match, Truncation 62
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 62
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [139] pair11_v6 | Pair 11, Type value_match, Truncation 52
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 52
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [140] pair11_v7 | Pair 11, Type value_match, Truncation 49
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 49
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [141] pair11_v8 | Pair 11, Type value_match, Truncation 46
+    SOURCE/TARGET usable length: 121
+    Layers patched: 64 | Positions patched: 46
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [142] pair12_v0 | Pair 12, Type value_match, Truncation 158
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 158
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [143] pair12_v1 | Pair 12, Type value_match, Truncation 158
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 158
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [144] pair12_v2 | Pair 12, Type value_match, Truncation 139
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 139
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [145] pair12_v3 | Pair 12, Type value_match, Truncation 132
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 132
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [146] pair12_v4 | Pair 12, Type value_match, Truncation 132
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 132
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [147] pair12_v5 | Pair 12, Type value_match, Truncation 132
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 132
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [148] pair12_v6 | Pair 12, Type value_match, Truncation 132
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 132
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [149] pair12_v7 | Pair 12, Type value_match, Truncation 132
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 132
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [150] pair12_v8 | Pair 12, Type value_match, Truncation 82
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 82
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [151] pair12_v9 | Pair 12, Type value_match, Truncation 76
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 76
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [152] pair12_v10 | Pair 12, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [153] pair12_v11 | Pair 12, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [154] pair12_v12 | Pair 12, Type value_match, Truncation 47
+    SOURCE/TARGET usable length: 168
+    Layers patched: 64 | Positions patched: 47
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [155] pair13_v0 | Pair 13, Type value_match, Truncation 162
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 162
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [156] pair13_v1 | Pair 13, Type value_match, Truncation 149
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 149
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [157] pair13_v2 | Pair 13, Type value_match, Truncation 145
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 145
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [158] pair13_v3 | Pair 13, Type value_match, Truncation 136
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 136
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [159] pair13_v4 | Pair 13, Type value_match, Truncation 131
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 131
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [160] pair13_v5 | Pair 13, Type value_match, Truncation 131
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 131
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [161] pair13_v6 | Pair 13, Type value_match, Truncation 108
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 108
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [162] pair13_v7 | Pair 13, Type value_match, Truncation 105
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 105
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [163] pair13_v8 | Pair 13, Type value_match, Truncation 97
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 97
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [164] pair13_v9 | Pair 13, Type value_match, Truncation 97
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 97
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [165] pair13_v10 | Pair 13, Type value_match, Truncation 97
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 97
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [166] pair13_v11 | Pair 13, Type value_match, Truncation 71
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 71
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [167] pair13_v12 | Pair 13, Type value_match, Truncation 71
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 71
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [168] pair13_v13 | Pair 13, Type value_match, Truncation 60
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 60
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [169] pair13_v14 | Pair 13, Type value_match, Truncation 60
+    SOURCE/TARGET usable length: 172
+    Layers patched: 64 | Positions patched: 60
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [170] pair14_v0 | Pair 14, Type value_match, Truncation 134
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 134
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [171] pair14_v1 | Pair 14, Type value_match, Truncation 119
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 119
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [172] pair14_v2 | Pair 14, Type value_match, Truncation 114
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 114
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [173] pair14_v3 | Pair 14, Type value_match, Truncation 102
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 102
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [174] pair14_v4 | Pair 14, Type value_match, Truncation 90
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 90
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [175] pair14_v5 | Pair 14, Type value_match, Truncation 81
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 81
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [176] pair14_v6 | Pair 14, Type value_match, Truncation 71
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 71
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [177] pair14_v7 | Pair 14, Type value_match, Truncation 61
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 61
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [178] pair14_v8 | Pair 14, Type value_match, Truncation 55
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 55
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [179] pair14_v9 | Pair 14, Type value_match, Truncation 50
+    SOURCE/TARGET usable length: 143
+    Layers patched: 64 | Positions patched: 50
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [180] pair15_v0 | Pair 15, Type value_match, Truncation 175
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 175
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [181] pair15_v1 | Pair 15, Type value_match, Truncation 158
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 158
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [182] pair15_v2 | Pair 15, Type value_match, Truncation 153
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 153
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [183] pair15_v3 | Pair 15, Type value_match, Truncation 146
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 146
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [184] pair15_v4 | Pair 15, Type value_match, Truncation 139
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 139
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [185] pair15_v5 | Pair 15, Type value_match, Truncation 139
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 139
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [186] pair15_v6 | Pair 15, Type value_match, Truncation 116
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 116
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [187] pair15_v7 | Pair 15, Type value_match, Truncation 110
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 110
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [188] pair15_v8 | Pair 15, Type value_match, Truncation 103
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 103
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [189] pair15_v9 | Pair 15, Type value_match, Truncation 103
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 103
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [190] pair15_v10 | Pair 15, Type value_match, Truncation 77
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 77
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [191] pair15_v11 | Pair 15, Type value_match, Truncation 77
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 77
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [192] pair15_v12 | Pair 15, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [193] pair15_v13 | Pair 15, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [194] pair15_v14 | Pair 15, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [195] pair15_v15 | Pair 15, Type value_match, Truncation 70
+    SOURCE/TARGET usable length: 184
+    Layers patched: 64 | Positions patched: 70
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [196] pair16_v0 | Pair 16, Type value_match, Truncation 212
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 212
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [197] pair16_v1 | Pair 16, Type value_match, Truncation 212
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 212
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [198] pair16_v2 | Pair 16, Type value_match, Truncation 194
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 194
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [199] pair16_v3 | Pair 16, Type value_match, Truncation 194
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 194
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [200] pair16_v4 | Pair 16, Type value_match, Truncation 183
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 183
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [201] pair16_v5 | Pair 16, Type value_match, Truncation 177
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 177
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [202] pair16_v6 | Pair 16, Type value_match, Truncation 177
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 177
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
+
+  [203] pair16_v7 | Pair 16, Type value_match, Truncation 177
+    SOURCE/TARGET usable length: 222
+    Layers patched: 64 | Positions patched: 177
+    Phase 1: capture SOURCE activations (all selected layers)
+    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs
+    Phase 3: single-cell patching over (layer, position)
