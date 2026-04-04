@@ -1598,7 +1598,6 @@ def get_all_generators():
     return {
         # Velocity as hidden variable
         'velocity_from_ke': gen_implicit_velocity_from_ke,
-        'velocity_from_ke_uniform_t': gen_implicit_velocity_from_ke_uniform_t,
         'velocity_from_ke_momentum': gen_implicit_velocity_from_ke_momentum,
         'velocity_from_momentum': gen_implicit_velocity_from_momentum,
         'velocity_from_energy_conservation': gen_implicit_velocity_from_energy_conservation,
@@ -1648,7 +1647,7 @@ def get_all_generators():
         
         # Force as hidden variable
         'force_pressure_to_acceleration': gen_implicit_force_pressure_to_acceleration,
-        'force_electric_field': gen_implicit_force_electric_field_to_acceleration,
+        #'force_electric_field': gen_implicit_force_electric_field_to_acceleration, # this one is problematic because of the formatting -- the charge and mass are very small numbers that get rounded to zero, fix this later
         'force_from_mass_acceleration': gen_implicit_force_from_mass_acceleration,
         
         # Frequency as hidden variable

@@ -114,7 +114,7 @@ def generate_prompts_with_cot_wrapper(experiment_name, n_prompts):
     
     # Add CoT instruction wrapper to each prompt
     for prompt_dict in prompts_data:
-        original_prompt = prompt_dict['prompt']
+        original_prompt = prompts.normalize_prompt_numbers(prompt_dict['prompt'])
         #prompt_dict['prompt'] = f"Question: {original_prompt} Answer (step-by-step): "
         prompt_dict['prompt'] = f"{original_prompt}"
     

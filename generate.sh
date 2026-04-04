@@ -20,11 +20,13 @@ module load arrow/21.0.0
 #pip install -e ../TransformerLens
 
 EXPERIMENT=${1:-velocity}
-N_PROMPTS=${2:-50}
-MODEL_PATH=/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Qwen2.5-32B
-OUTPUT_DIR=/home/wuroderi/links/scratch/traces/$(basename "$MODEL_PATH")/$EXPERIMENT
+MODEL_NAME=${2:-Qwen2.5-32B}
+N_PROMPTS=${3:-50}
+MODEL_PATH=/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/$MODEL_NAME
+OUTPUT_DIR=/home/wuroderi/links/scratch/traces/$MODEL_NAME/$EXPERIMENT
 TRACE_FILE="$OUTPUT_DIR/traces.json"
 CONFIG_FILE="$OUTPUT_DIR/config.json"
+BATCH=8
 
 if [ -f "$TRACE_FILE" ] && [ -f "$CONFIG_FILE" ]; then
 	if TRACE_FILE="$TRACE_FILE" CONFIG_FILE="$CONFIG_FILE" EXPERIMENT="$EXPERIMENT" N_PROMPTS="$N_PROMPTS" MODEL_PATH="$MODEL_PATH" python - <<'PY'
@@ -64,6 +66,6 @@ fi
 
 #python generate_traces.py --experiment current --n_prompts 200 --max_new_tokens 256 --model_path /home/wuroderi/projects/def-zhijing/wuroderi/models/QwQ-32B-Preview
 
-python generate_traces.py --experiment "$EXPERIMENT" --n_prompts "$N_PROMPTS" --max_new_tokens 256 --model_path "$MODEL_PATH"
+python generate_traces.py --experiment "$EXPERIMENT" --n_prompts "$N_PROMPTS" --max_new_tokens 256 --model_path "$MODEL_PATH" --batch_size $BATCH
 #python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path /home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Llama3.1-8B
 #python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path /home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Llama3.1-70

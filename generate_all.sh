@@ -9,11 +9,13 @@ if [ "$SAMPLES_PER_FORMAT" -lt 1 ]; then
     exit 1
 fi
 
+MODEL_NAME="Qwen2.5-72B"
+
 # Pull all available generator names + their prompt format counts from prompts.py.
 while IFS=$'\t' read -r experiment n_formats
 do
     [ -z "$experiment" ] && continue
     N_PROMPTS=$((n_formats * SAMPLES_PER_FORMAT))
     echo "Submitting ${experiment}: ${n_formats} formats x ${SAMPLES_PER_FORMAT} samples/format = ${N_PROMPTS} prompts"
-    sbatch generate.sh "$experiment" "$N_PROMPTS"
+    sbatch generate.sh "$experiment" "$MODEL_NAME" "$N_PROMPTS"
 done < <(python list_all_experiments.py)

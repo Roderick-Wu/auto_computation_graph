@@ -359,6 +359,7 @@ def main() -> None:
 
     out_pairs: List[Dict[str, Any]] = []
     equal_token_count = 0
+    rejected_token_count = 0
 
     for pair in pairs:
         source_text = pair.get("pair", {}).get("source", {}).get("generated_text") or ""
@@ -378,6 +379,8 @@ def main() -> None:
         token_lengths_equal = len(src_token_ids) == len(cf_token_ids)
         if token_lengths_equal:
             equal_token_count += 1
+        else:
+            rejected_token_count += 1
 
         pair_copy = dict(pair)
         pair_copy.setdefault("pair", {}).setdefault("source", {})
@@ -400,6 +403,12 @@ def main() -> None:
             "counterfactual_token_count": len(cf_token_ids),
             "token_counts_equal": token_lengths_equal,
         }
+
+        if not token_lengths_equal:
+            pair_id = pair.get('id', 'unknown')
+            print(f"  Rejecting pair {pair_id} because token counts differ: source={len(src_token_ids)} cf={len(cf_token_ids)}")
+            print("-" * 40)
+            continue
 
         out_pairs.append(pair_copy)
 
@@ -436,7 +445,8 @@ def main() -> None:
         "output": {
             "n_pairs": len(out_pairs),
             "n_equal_token_count": equal_token_count,
-            "equal_token_ratio": (equal_token_count / len(out_pairs)) if out_pairs else 0.0,
+            "n_rejected_token_count": rejected_token_count,
+            "equal_token_ratio": (equal_token_count / len(pairs)) if pairs else 0.0,
         },
         "pairs": out_pairs,
     }

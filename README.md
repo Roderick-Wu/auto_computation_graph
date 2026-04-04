@@ -11,7 +11,7 @@ This directory implements the trace-generation and causal-patching pipeline for 
 2. Validate the traces with [reject_traces.py](reject_traces.py).
    - Truncate runaway continuations so only the first trace segment is inspected.
    - Reject traces whose final answer is missing or outside tolerance.
-   - Save accepted traces to `reject_traces.json`.
+   - Save the accepted traces to `reject_traces.json`.
 
 3. Branch into one of two patching paths.
    - Path A, counterfactual patching:
@@ -21,6 +21,7 @@ This directory implements the trace-generation and causal-patching pipeline for 
     - Path B, direct trace patching:
        - [intervene_graph_nopair.py](intervene_graph_nopair.py) takes `reject_traces.json` directly.
      - It does not need a counterfactual trace; it injects Gaussian noise by default.
+       - Slurm wrapper: `bash patch_graph_nopair.sh <experiment> [model_name]`.
 
 4. Build graphs from the patching matrices with [construct_graph.py](construct_graph.py).
    - The output is a value-level causal graph built from the difference matrices.
@@ -42,7 +43,7 @@ This directory implements the trace-generation and causal-patching pipeline for 
 ## Outputs
 
 - `traces.json` from generation
-- `reject_traces.json` from validation/rejection
+- `reject_traces.json` from validation/rejection (accepted traces)
 - `paired_traces.json` from counterfactual pairing
 - `patch_runs/` from pairwise activation patching
 - `patch_solo/` from direct noise patching
@@ -103,6 +104,7 @@ Single experiment on single pair:
 ```bash
 bash validate_causal_structure.sh Qwen2.5-72B velocity
 bash skip_nodes.sh Qwen2.5-72B velocity
+bash patch_graph_nopair.sh velocity Qwen2.5-72B
 ```
 
 All experiments on a model (uses registered experiments from `prompts.py`):

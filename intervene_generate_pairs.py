@@ -461,6 +461,8 @@ def main() -> None:
             _source_prompt_length,
         ) = split_trace_fields(source_trace)
 
+        prompt_text = prompts.normalize_prompt_numbers(prompt_text)
+
         source_generated_text, _ = truncate_after_first_question_block(source_generated_text)
 
         cf_prompt_metadata, replacements = build_counterfactual_metadata(
