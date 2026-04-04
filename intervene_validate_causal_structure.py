@@ -692,7 +692,7 @@ def main():
     parser.add_argument("--output-json", type=Path, default=None, help="Output results JSON.")
     parser.add_argument("--max-pairs", type=int, default=5, help="Max pairs to test.")
     parser.add_argument("--max-tests-per-pair", type=int, default=10, help="Max tests per pair.")
-    parser.add_argument("--batch-size", type=int, default=8, help="Batch size for generation.")
+    parser.add_argument("--batch-size", type=int, default=16, help="Batch size for generation.")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu).")
     parser.add_argument("--dtype", type=str, default="float16", help="Model dtype (float32 or float16).")
     

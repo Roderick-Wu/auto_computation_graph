@@ -456,7 +456,7 @@ def main():
     parser.add_argument("--output-json", type=Path, default=None, help="Output results.")
     parser.add_argument("--max-pairs", type=int, default=5, help="Max pairs to test.")
     parser.add_argument("--max-skip-depths", type=int, default=3, help="Max depth of skips.")
-    parser.add_argument("--batch-size", type=int, default=8, help="Batch size for generation.")
+    parser.add_argument("--batch-size", type=int, default=16, help="Batch size for generation.")
     parser.add_argument("--device", type=str, default="cuda", help="Device.")
     parser.add_argument("--dtype", type=str, default="float16", help="Model dtype.")
     
