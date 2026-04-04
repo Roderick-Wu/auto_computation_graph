@@ -127,9 +127,43 @@ def try_get_token_offsets(tokenizer: Any, text: str) -> Optional[List[Tuple[int,
         return None
 
     offsets = encoded.get("offset_mapping") if isinstance(encoded, dict) else None
-    if not isinstance(offsets, list):
+    if isinstance(offsets, list):
+        return [(int(start), int(end)) for start, end in offsets]
+
+    try:
+        token_ids = tokenizer(text, add_special_tokens=False, return_tensors=None)["input_ids"]
+        token_strings = [tokenizer.decode([tid]) for tid in token_ids]
+    except Exception:
         return None
-    return [(int(start), int(end)) for start, end in offsets]
+
+    reconstructed: List[Tuple[int, int]] = []
+    cursor = 0
+    for token_text in token_strings:
+        if token_text == "":
+            reconstructed.append((cursor, cursor))
+            continue
+
+        if text.startswith(token_text, cursor):
+            start = cursor
+            end = start + len(token_text)
+            reconstructed.append((start, end))
+            cursor = end
+            continue
+
+        found = text.find(token_text, cursor)
+        if found == -1:
+            start = cursor
+            end = min(len(text), start + len(token_text))
+            reconstructed.append((start, end))
+            cursor = end
+            continue
+
+        start = found
+        end = start + len(token_text)
+        reconstructed.append((start, end))
+        cursor = end
+
+    return reconstructed
 
 
 def char_span_to_token_span(offsets: Optional[List[Tuple[int, int]]], span_start: int, span_end: int) -> Tuple[Optional[int], Optional[int]]:
@@ -146,6 +180,18 @@ def char_span_to_token_span(offsets: Optional[List[Tuple[int, int]]], span_start
         if token_start is None:
             token_start = idx
         token_end = idx + 1
+    if token_start is None:
+        for idx, (tok_start, _tok_end) in enumerate(offsets):
+            if tok_start >= span_start:
+                token_start = idx
+                token_end = idx + 1
+                break
+        if token_start is None and offsets:
+            token_start = len(offsets) - 1
+            token_end = len(offsets)
+
+    if token_start is not None and token_end is None:
+        token_end = token_start + 1
     return token_start, token_end
 
 
