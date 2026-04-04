@@ -321,6 +321,61 @@ def generate_from_truncation(
         return truncated_text, 0
 
 
+def generate_batch(
+    model: Any,
+    tokenizer: Any,
+    truncated_texts: List[str],
+    max_new_tokens: int = 50,
+    temperature: float = 1.0,
+) -> List[Tuple[str, int]]:
+    """Generate continuations for a batch of truncated texts in parallel.
+    
+    Returns list of (full_text, new_tokens_generated) tuples.
+    """
+    if not truncated_texts:
+        return []
+    
+    if len(truncated_texts) == 1:
+        result = generate_from_truncation(model, tokenizer, truncated_texts[0], max_new_tokens, temperature)
+        return [result]
+    
+    try:
+        # Tokenize batch with padding
+        encoded = tokenizer(
+            truncated_texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=False,
+        )
+        input_ids = encoded["input_ids"].to(model.device)
+        attention_mask = encoded["attention_mask"].to(model.device)
+        
+        # Generate in batch
+        with torch.inference_mode():
+            outputs = model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=0.95,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        
+        # Decode results
+        results = []
+        for i, output_ids in enumerate(outputs):
+            full_text = tokenizer.decode(output_ids, skip_special_tokens=True)
+            input_len = input_ids[i].shape[0]
+            num_new = output_ids.shape[0] - input_len
+            results.append((full_text, int(num_new)))
+        
+        return results
+    except Exception as e:
+        # Fallback to sequential generation
+        return [generate_from_truncation(model, tokenizer, text, max_new_tokens, temperature) for text in truncated_texts]
+
+
 def run_intervention_test(
     model: Any,
     tokenizer: Any,
@@ -431,10 +486,13 @@ def run_validation_on_pair(
     pair_path: Path,
     aligned_pairs_dict: Dict[str, Dict],
     max_tests_per_pair: int = 10,
+    batch_size: int = 8,
 ) -> List[InterventionResult]:
-    """Run validation tests on a single pair."""
+    """Run validation tests on a single pair with batched generation."""
     
     results = []
+    trace_text = None
+    expected_answer = None
     
     # Load graph.json alongside pair
     graph_path = pair_path.parent / "graph.json"
@@ -444,6 +502,11 @@ def run_validation_on_pair(
     
     pair = aligned_pairs_dict.get(str(pair_id))
     if not pair:
+        return results
+    
+    trace_text = get_pair_trace_text(pair)
+    expected_answer = get_pair_expected_answer(pair)
+    if not trace_text or expected_answer is None:
         return results
     
     node_stats = graph.get("node_stats", {})
@@ -464,7 +527,13 @@ def run_validation_on_pair(
     if len(test_nodes) > 5:
         test_nodes = test_nodes[:5]  # limit to first 5 if many
     
+    # Batch up all tests to run in parallel
+    pending_tests: List[Tuple[InterventionResult, str, List[str], str]] = []  # (result_obj, truncated_text, corrupted_node_ids, control_type)
+    
     for value_node_id in test_nodes:
+        if len(results) >= max_tests_per_pair:
+            break
+            
         node_parents = list(parents_of.get(value_node_id, set()))
         all_other_nodes = [n for n in nodes.keys() if n != value_node_id and n not in node_parents]
         
@@ -473,41 +542,105 @@ def run_validation_on_pair(
         
         # Positive control: corrupt parents
         for corruption_method in ["false_values", "masking"]:
-            if len(results) >= max_tests_per_pair:
+            if len(results) + len(pending_tests) >= max_tests_per_pair:
                 break
             
-            result = run_intervention_test(
-                model, tokenizer,
-                pair_id, pair, graph,
-                value_node_id,
-                node_stats,
-                node_parents[:min(2, len(node_parents))],  # corrupt up to 2 parents
-                "positive",
-                corruption_method,
+            corrupted_node_ids = node_parents[:min(2, len(node_parents))]
+            trunc_idx = node_stats.get(value_node_id, {}).get("truncation_token_index", -1)
+            if trunc_idx < 0:
+                continue
+            
+            truncated_text = truncate_after_first_question(trace_text, trunc_idx)
+            
+            test_id = f"{pair_id}_{value_node_id}_positive_{corruption_method}_{len(corrupted_node_ids)}"
+            result = InterventionResult(
+                test_id=test_id,
+                pair_id=pair_id,
+                value_node_id=value_node_id,
+                truncation_token_idx=trunc_idx,
+                intervention_type="positive_control",
+                corruption_method=corruption_method,
+                corrupted_node_ids=corrupted_node_ids,
+                baseline_answer=None,
+                intervened_answer=None,
+                answer_changed=False,
             )
-            results.append(result)
+            pending_tests.append((result, truncated_text, corrupted_node_ids, "positive"))
         
         # Negative control: corrupt non-parents
         if all_other_nodes:
             for corruption_method in ["false_values"]:
-                if len(results) >= max_tests_per_pair:
+                if len(results) + len(pending_tests) >= max_tests_per_pair:
                     break
                 
-                # Pick 1-2 non-parent nodes to corrupt
                 non_parents = all_other_nodes[:min(2, len(all_other_nodes))]
-                result = run_intervention_test(
-                    model, tokenizer,
-                    pair_id, pair, graph,
-                    value_node_id,
-                    node_stats,
-                    non_parents,
-                    "negative",
-                    corruption_method,
+                trunc_idx = node_stats.get(value_node_id, {}).get("truncation_token_index", -1)
+                if trunc_idx < 0:
+                    continue
+                
+                truncated_text = truncate_after_first_question(trace_text, trunc_idx)
+                
+                test_id = f"{pair_id}_{value_node_id}_negative_{corruption_method}_{len(non_parents)}"
+                result = InterventionResult(
+                    test_id=test_id,
+                    pair_id=pair_id,
+                    value_node_id=value_node_id,
+                    truncation_token_idx=trunc_idx,
+                    intervention_type="negative_control",
+                    corruption_method=corruption_method,
+                    corrupted_node_ids=non_parents,
+                    baseline_answer=None,
+                    intervened_answer=None,
+                    answer_changed=False,
                 )
-                results.append(result)
+                pending_tests.append((result, truncated_text, non_parents, "negative"))
+    
+    # Process pending tests in batches
+    for batch_start in range(0, len(pending_tests), batch_size):
+        batch_end = min(batch_start + batch_size, len(pending_tests))
+        batch = pending_tests[batch_start:batch_end]
         
-        if len(results) >= max_tests_per_pair:
-            break
+        # Generate baselines for this batch
+        baseline_texts = [truncated for (_, truncated, _, _) in batch]
+        baselines = generate_batch(model, tokenizer, baseline_texts, max_new_tokens=50)
+        
+        # Generate intervened versions
+        intervened_texts = []
+        for (_, truncated, corrupted_node_ids, _) in batch:
+            corrupted_text = truncated
+            for corrupt_node_id in corrupted_node_ids:
+                node_value_texts = [n.get("value_texts", []) for n in graph["nodes"] if n.get("id") == corrupt_node_id]
+                if node_value_texts and node_value_texts[0]:
+                    value_text = node_value_texts[0][0]
+                    char_start = corrupted_text.find(value_text)
+                    if char_start >= 0:
+                        char_end = char_start + len(value_text)
+                        corrupted_text = corrupt_node_in_trace(
+                            corrupted_text, corrupt_node_id, value_text,
+                            (char_start, char_end), 
+                            batch[batch_start].corruption_method,
+                        )
+            intervened_texts.append(corrupted_text)
+        
+        intervened = generate_batch(model, tokenizer, intervened_texts, max_new_tokens=50)
+        
+        # Update results
+        for i, (result, truncated, corrupted_node_ids, control_type) in enumerate(batch):
+            baseline_text, baseline_len = baselines[i]
+            intervened_text, intervened_len = intervened[i]
+            
+            baseline_answer = extract_final_answer_value(baseline_text)
+            intervened_answer = extract_final_answer_value(intervened_text)
+            
+            result.baseline_answer = baseline_answer
+            result.intervened_answer = intervened_answer
+            result.generation_length = intervened_len
+            
+            if baseline_answer is not None and intervened_answer is not None:
+                error = compute_relative_error(intervened_answer, baseline_answer)
+                result.answer_changed = error > 0.05
+            
+            results.append(result)
     
     return results
 
@@ -559,6 +692,7 @@ def main():
     parser.add_argument("--output-json", type=Path, default=None, help="Output results JSON.")
     parser.add_argument("--max-pairs", type=int, default=5, help="Max pairs to test.")
     parser.add_argument("--max-tests-per-pair", type=int, default=10, help="Max tests per pair.")
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size for generation.")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu).")
     parser.add_argument("--dtype", type=str, default="float16", help="Model dtype (float32 or float16).")
     
@@ -602,6 +736,7 @@ def main():
             pair_name, pair_dir,
             aligned_pairs_dict,
             max_tests_per_pair=args.max_tests_per_pair,
+            batch_size=args.batch_size,
         )
         all_results.extend(results)
         print(f"  {len(results)} tests completed")

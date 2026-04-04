@@ -213,6 +213,58 @@ def generate_from_truncation(
         return truncated_text, 0
 
 
+def generate_batch(
+    model: Any,
+    tokenizer: Any,
+    truncated_texts: List[str],
+    max_new_tokens: int = 100,
+    temperature: float = 0.7,
+) -> List[Tuple[str, int]]:
+    """Generate continuations for a batch of truncated texts in parallel."""
+    if not truncated_texts:
+        return []
+    
+    if len(truncated_texts) == 1:
+        result = generate_from_truncation(model, tokenizer, truncated_texts[0], max_new_tokens, temperature)
+        return [result]
+    
+    try:
+        # Tokenize batch with padding
+        encoded = tokenizer(
+            truncated_texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=False,
+        )
+        input_ids = encoded["input_ids"].to(model.device)
+        attention_mask = encoded["attention_mask"].to(model.device)
+        
+        # Generate in batch
+        with torch.inference_mode():
+            outputs = model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=0.95,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        
+        # Decode results
+        results = []
+        for i, output_ids in enumerate(outputs):
+            full_text = tokenizer.decode(output_ids, skip_special_tokens=True)
+            input_len = input_ids[i].shape[0]
+            num_new = output_ids.shape[0] - input_len
+            results.append((full_text, int(num_new)))
+        
+        return results
+    except Exception:
+        # Fallback to sequential generation
+        return [generate_from_truncation(model, tokenizer, text, max_new_tokens, temperature) for text in truncated_texts]
+
+
 def build_parent_chain(node_id: str, graph: Dict) -> List[str]:
     """Get all ancestors of a node in topological order (child to root)."""
     edges = graph.get("edges", [])
@@ -241,8 +293,9 @@ def test_node_skipping_on_pair(
     graph: Dict,
     max_skip_depths: int = 3,
     max_tests: int = 20,
+    batch_size: int = 8,
 ) -> List[SkippingTest]:
-    """Test skipping nodes for a single pair."""
+    """Test skipping nodes for a single pair with batched generation."""
     
     results = []
     trace_text = get_pair_trace_text(pair)
@@ -262,12 +315,18 @@ def test_node_skipping_on_pair(
     # Focus on final answer (v0) and intermediate values
     reachable_nodes = [n for n in nodes.keys() if n.startswith("v")]
     
+    # Batch up all skip tests to run in parallel
+    pending_tests: List[Tuple[SkippingTest, str, str]] = []  # (test_obj, forced_prompt, target_node)
+    
     for target_node in reachable_nodes[:3]:  # Test a few key nodes
+        if len(results) + len(pending_tests) >= max_tests:
+            break
+            
         parent_chain = build_parent_chain(target_node, graph)
         
         # Try different depths of skipping
         for skip_depth in range(1, min(max_skip_depths + 1, len(parent_chain))):
-            if len(results) >= max_tests:
+            if len(results) + len(pending_tests) >= max_tests:
                 break
             
             # Nodes to skip: all except the kept ones
@@ -300,12 +359,33 @@ def test_node_skipping_on_pair(
             # Append forced value generation prompt
             forced_prompt = truncated + " ... " + forced_prefix
             
-            # Generate
-            generated, gen_len = generate_from_truncation(
-                model, tokenizer, forced_prompt,
-                max_new_tokens=100,
+            test = SkippingTest(
+                test_id=f"{pair_id}_{target_node}_skip{skip_depth}",
+                pair_id=pair_id,
+                skipped_nodes=nodes_to_skip,
+                kept_nodes=nodes_to_keep,
+                truncation_idx=trunc_idx,
+                baseline_answer=baseline_answer,
+                skipped_answer=None,
+                answer_correct=False,
+                answer_same=False,
+                forced_value=forced_value,
+                generation_succeeded=False,
             )
-            
+            pending_tests.append((test, forced_prompt, target_node))
+    
+    # Process pending tests in batches
+    for batch_start in range(0, len(pending_tests), batch_size):
+        batch_end = min(batch_start + batch_size, len(pending_tests))
+        batch = pending_tests[batch_start:batch_end]
+        
+        # Generate all in batch
+        forced_prompts = [prompt for (_, prompt, _) in batch]
+        generations = generate_batch(model, tokenizer, forced_prompts, max_new_tokens=100, temperature=0.7)
+        
+        # Update results
+        for i, (test, forced_prompt, target_node) in enumerate(batch):
+            generated, gen_len = generations[i]
             skipped_answer = extract_final_answer_value(generated)
             
             # Check correctness
@@ -319,19 +399,11 @@ def test_node_skipping_on_pair(
                 abs(skipped_answer - baseline_answer) < 1e-9
             )
             
-            test = SkippingTest(
-                test_id=f"{pair_id}_{target_node}_skip{skip_depth}",
-                pair_id=pair_id,
-                skipped_nodes=nodes_to_skip,
-                kept_nodes=nodes_to_keep,
-                truncation_idx=trunc_idx,
-                baseline_answer=baseline_answer,
-                skipped_answer=skipped_answer,
-                answer_correct=answer_correct,
-                answer_same=answer_same,
-                forced_value=forced_value,
-                generation_succeeded=gen_len > 0,
-            )
+            test.skipped_answer = skipped_answer
+            test.answer_correct = answer_correct
+            test.answer_same = answer_same
+            test.generation_succeeded = gen_len > 0
+            
             results.append(test)
     
     return results
@@ -384,6 +456,7 @@ def main():
     parser.add_argument("--output-json", type=Path, default=None, help="Output results.")
     parser.add_argument("--max-pairs", type=int, default=5, help="Max pairs to test.")
     parser.add_argument("--max-skip-depths", type=int, default=3, help="Max depth of skips.")
+    parser.add_argument("--batch-size", type=int, default=8, help="Batch size for generation.")
     parser.add_argument("--device", type=str, default="cuda", help="Device.")
     parser.add_argument("--dtype", type=str, default="float16", help="Model dtype.")
     
@@ -430,6 +503,7 @@ def main():
             pair_name, pair, graph,
             max_skip_depths=args.max_skip_depths,
             max_tests=20,
+            batch_size=args.batch_size,
         )
         all_results.extend(results)
         print(f"  {len(results)} skipping tests completed")
