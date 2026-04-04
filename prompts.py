@@ -1307,6 +1307,263 @@ def gen_implicit_angle_components_to_magnitude(samples_per_prompt):
     return prompts_data
 
 
+def gen_implicit_velocity_from_distance_time(samples_per_prompt):
+    """Distance and time imply velocity, which is then used to extrapolate a different segment of travel."""
+    prompts_data = []
+
+    objects = ["car", "train", "runner", "bike", "plane", "boat"]
+    prompt_formats = [
+        "A {obj} covers {d} meters in {t} seconds. If it keeps the same pace, how long will it take to cover another {d2} meters?",
+        "Given that a {obj} goes {d} m in {t} s, estimate the time needed to travel an additional {d2} meters.",
+        "The {obj} moves {d} meters in {t} seconds. How many seconds are required for it to go {d2} more meters at the same speed?",
+        "Distance: {d} m, Time: {t} s. At this pace, what is the travel time for a further {d2} m for this {obj}?",
+        "Consider a {obj} that covers {d} meters in {t} seconds. How long does it need to travel {d2} extra meters?"
+    ]
+
+    for format_id, prompt_format in enumerate(prompt_formats):
+        for _ in range(samples_per_prompt):
+            d = np.random.randint(20, 200)
+            t = np.random.randint(2, 20)
+            d2 = np.random.randint(20, 250)
+            obj = np.random.choice(objects)
+
+            v = d / t
+            expected_time = d2 / v
+
+            prompt = "Question: " + prompt_format.format(obj=obj, d=d, t=t, d2=d2) + " Answer (step-by-step): "
+
+            prompts_data.append({
+                'prompt': prompt,
+                'format_id': format_id,
+                'object': obj,
+                'd': d,
+                't': t,
+                'd2': d2,
+                'v': v,
+                'expected_time': expected_time,
+            })
+
+    return prompts_data
+
+
+def gen_implicit_current_from_charge_time(samples_per_prompt):
+    """Charge and time imply current, which is then used to extrapolate a later charge transfer."""
+    prompts_data = []
+
+    objects = ["device", "wire", "resistor", "circuit", "appliance"]
+    prompt_formats = [
+        "A {obj} transfers {q} coulombs in {t} seconds. If the current stays constant, how much charge moves in the next {t2} seconds?",
+        "Given a {obj} carrying {q} C over {t} s, estimate the charge moved during an additional {t2} seconds.",
+        "The {obj} moves {q} coulombs in {t} seconds. How much charge passes through it over another {t2} seconds?",
+        "Charge: {q} C, Time: {t} s. At the same rate, find the charge flow in the next {t2} seconds for this {obj}.",
+        "Consider a {obj} with {q} coulombs over {t} seconds. How much charge will flow in a further {t2} seconds?"
+    ]
+
+    for format_id, prompt_format in enumerate(prompt_formats):
+        for _ in range(samples_per_prompt):
+            q = np.random.randint(10, 100)
+            t = np.random.randint(2, 20)
+            t2 = np.random.randint(5, 30)
+            obj = np.random.choice(objects)
+
+            i = q / t
+            expected_charge = i * t2
+
+            prompt = "Question: " + prompt_format.format(obj=obj, q=q, t=t, t2=t2) + " Answer (step-by-step): "
+
+            prompts_data.append({
+                'prompt': prompt,
+                'format_id': format_id,
+                'object': obj,
+                'q': q,
+                't': t,
+                't2': t2,
+                'i': i,
+                'expected_charge': expected_charge,
+            })
+
+    return prompts_data
+
+
+def gen_implicit_force_from_mass_acceleration(samples_per_prompt):
+    """Mass and acceleration imply force, which is then used to compute impulse over time."""
+    prompts_data = []
+
+    objects = ["cart", "box", "sled", "probe", "vehicle"]
+    prompt_formats = [
+        "A {obj} of mass {m} kg accelerates at {a} m/s² for {t} seconds. How much momentum change does it accumulate?",
+        "Given a {m} kg {obj} with acceleration {a} m/s² over {t} s, determine the total impulse delivered.",
+        "The {obj} has mass {m} kg and acceleration {a} m/s². What impulse is delivered after {t} seconds?",
+        "Mass: {m} kg, Acceleration: {a} m/s². Find the impulse gained by this {obj} over {t} seconds.",
+        "Consider a {m} kg {obj} accelerating at {a} m/s². Calculate the impulse after {t} seconds."
+    ]
+
+    for format_id, prompt_format in enumerate(prompt_formats):
+        for _ in range(samples_per_prompt):
+            m = np.random.randint(2, 20)
+            a = np.random.randint(1, 10)
+            t = np.random.randint(2, 20)
+            obj = np.random.choice(objects)
+
+            force = m * a
+            expected_impulse = force * t
+
+            prompt = "Question: " + prompt_format.format(obj=obj, m=m, a=a, t=t) + " Answer (step-by-step): "
+
+            prompts_data.append({
+                'prompt': prompt,
+                'format_id': format_id,
+                'object': obj,
+                'm': m,
+                'a': a,
+                't': t,
+                'force': force,
+                'expected_impulse': expected_impulse,
+            })
+
+    return prompts_data
+
+
+def gen_implicit_acceleration_from_velocity_change(samples_per_prompt):
+    """Velocity change over time implies acceleration, which is then used to compute force."""
+    prompts_data = []
+
+    objects = ["car", "train", "drone", "runner", "cart"]
+    prompt_formats = [
+        "A {obj} changes speed from {u} m/s to {v} m/s in {t} seconds. What acceleration did it experience?",
+        "Given a {m} kg {obj} going from {u} m/s to {v} m/s in {t} s, determine its acceleration.",
+        "The {obj} speeds up from {u} m/s to {v} m/s over {t} seconds. What is the acceleration of the motion?",
+        "Initial speed: {u} m/s, Final speed: {v} m/s, Time: {t} s. Find the acceleration of this {obj}.",
+        "Consider a {m} kg {obj} whose speed changes from {u} m/s to {v} m/s in {t} seconds. Calculate the acceleration."
+    ]
+
+    for format_id, prompt_format in enumerate(prompt_formats):
+        for _ in range(samples_per_prompt):
+            u = np.random.randint(0, 20)
+            v = np.random.randint(u + 1, u + 20)
+            t = np.random.randint(2, 15)
+            m = np.random.randint(2, 20)
+            obj = np.random.choice(objects)
+
+            a = (v - u) / t
+            expected_force = m * a
+
+            prompt = "Question: " + prompt_format.format(obj=obj, u=u, v=v, t=t, m=m) + " Answer (step-by-step): "
+
+            prompts_data.append({
+                'prompt': prompt,
+                'format_id': format_id,
+                'object': obj,
+                'u': u,
+                'v': v,
+                't': t,
+                'm': m,
+                'a': a,
+                'expected_force': expected_force,
+            })
+
+    return prompts_data
+
+
+def gen_implicit_radius_from_circumference(samples_per_prompt):
+    """Circumference implies radius, which is then used to compute area."""
+    prompts_data = []
+
+    prompt_formats = [
+        "A circular track has circumference {c} meters. What area would a filled disk with that same boundary cover?",
+        "Given a circle with circumference {c} m, calculate the area enclosed by the same ring.",
+        "The circumference of a round table is {c} meters. Determine the tabletop area.",
+        "Circumference: {c} m. Find the area enclosed by the circle.",
+        "Consider a circle with circumference {c} meters. What is the area inside it?"
+    ]
+
+    for format_id, prompt_format in enumerate(prompt_formats):
+        for _ in range(samples_per_prompt):
+            r = np.random.randint(2, 30)
+            c = 2 * np.pi * r
+            area = np.pi * r ** 2
+
+            prompt = "Question: " + prompt_format.format(c=f"{c:.2f}") + " Answer (step-by-step): "
+
+            prompts_data.append({
+                'prompt': prompt,
+                'format_id': format_id,
+                'c': c,
+                'r': r,
+                'expected_area': area,
+            })
+
+    return prompts_data
+
+
+def gen_implicit_side_length_from_perimeter(samples_per_prompt):
+    """Perimeter implies side length, which is then used to compute area."""
+    prompts_data = []
+
+    prompt_formats = [
+        "A square fence has perimeter {p} meters. What area of ground does it enclose?",
+        "Given a square with perimeter {p} m, determine the land area inside it.",
+        "The square's perimeter is {p} meters. Calculate the enclosed area.",
+        "Perimeter: {p} m. Find the area inside the square.",
+        "Consider a square with perimeter {p} meters. How many square meters are inside?"
+    ]
+
+    for format_id, prompt_format in enumerate(prompt_formats):
+        for _ in range(samples_per_prompt):
+            s = np.random.randint(2, 30)
+            p = 4 * s
+            expected_area = s ** 2
+
+            prompt = "Question: " + prompt_format.format(p=p) + " Answer (step-by-step): "
+
+            prompts_data.append({
+                'prompt': prompt,
+                'format_id': format_id,
+                'p': p,
+                's': s,
+                'expected_area': expected_area,
+            })
+
+    return prompts_data
+
+
+def gen_implicit_frequency_from_period(samples_per_prompt):
+    """Period implies frequency, which is then used to count oscillations over time."""
+    prompts_data = []
+
+    objects = ["pendulum", "oscillator", "wave", "signal", "vibration"]
+    prompt_formats = [
+        "A metronome ticks once every {period} seconds. How many ticks will it make in {t} seconds?",
+        "Given a {obj} period of {period} s, calculate how many cycles occur in {t} seconds.",
+        "The {obj} repeats every {period} seconds. Determine the number of repetitions over {t} seconds.",
+        "Period: {period} s. Find the total number of oscillations in {t} seconds for this {obj}.",
+        "Consider a {obj} with period {period} seconds. How many complete cycles happen in {t} seconds?"
+    ]
+
+    for format_id, prompt_format in enumerate(prompt_formats):
+        for _ in range(samples_per_prompt):
+            period = np.random.randint(2, 10)
+            t = np.random.randint(10, 50)
+            obj = np.random.choice(objects)
+
+            frequency = 1 / period
+            expected_cycles = frequency * t
+
+            prompt = "Question: " + prompt_format.format(obj=obj, period=period, t=t) + " Answer (step-by-step): "
+
+            prompts_data.append({
+                'prompt': prompt,
+                'format_id': format_id,
+                'object': obj,
+                'period': period,
+                't': t,
+                'frequency': frequency,
+                'expected_cycles': expected_cycles,
+            })
+
+    return prompts_data
+
+
 # ==========================================
 # UTILITY FUNCTIONS
 # ==========================================
@@ -1322,24 +1579,29 @@ def get_all_generators():
         'velocity_from_ke_momentum': gen_implicit_velocity_from_ke_momentum,
         'velocity_from_momentum': gen_implicit_velocity_from_momentum,
         'velocity_from_energy_conservation': gen_implicit_velocity_from_energy_conservation,
+        'velocity_from_distance_time': gen_implicit_velocity_from_distance_time,
         
         # Current as hidden variable
         'current_from_power': gen_implicit_current_from_power,
         'current_from_voltage': gen_implicit_current_from_voltage,
+        'current_from_charge_time': gen_implicit_current_from_charge_time,
         
         # Acceleration as hidden variable
         'acceleration_force_to_distance': gen_implicit_acceleration_force_to_distance,
         'acceleration_velocity_to_force': gen_implicit_acceleration_velocity_to_force,
         'acceleration_spring': gen_implicit_acceleration_spring_to_acceleration,
+        'acceleration_from_velocity_change': gen_implicit_acceleration_from_velocity_change,
         
         # Radius as hidden variable
         'radius_from_area': gen_implicit_radius_from_area,
         'radius_from_sphere_volume': gen_implicit_radius_from_sphere_volume,
         'radius_from_cylinder_volume': gen_implicit_radius_from_cylinder_volume,
+        'radius_from_circumference': gen_implicit_radius_from_circumference,
         
         # Side length as hidden variable
         'side_length_from_volume': gen_implicit_side_length_from_volume,
         'side_length_from_area': gen_implicit_side_length_from_area,
+        'side_length_from_perimeter': gen_implicit_side_length_from_perimeter,
         
         # Wavelength as hidden variable
         'wavelength_from_speed': gen_implicit_wavelength_from_speed,
@@ -1364,9 +1626,11 @@ def get_all_generators():
         # Force as hidden variable
         'force_pressure_to_acceleration': gen_implicit_force_pressure_to_acceleration,
         'force_electric_field': gen_implicit_force_electric_field_to_acceleration,
+        'force_from_mass_acceleration': gen_implicit_force_from_mass_acceleration,
         
         # Frequency as hidden variable
         'frequency_pendulum_to_gravity': gen_implicit_frequency_pendulum_to_gravity,
+        'frequency_from_period': gen_implicit_frequency_from_period,
         
         # Angle as hidden variable
         'angle_ramp_to_acceleration': gen_implicit_angle_ramp_to_acceleration,

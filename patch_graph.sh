@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=patch_graph
-#SBATCH --time=0-48:00:00 # D-HH:MM
-#SBATCH --account=def-rgrosse
-#SBATCH --mem=128G
+#SBATCH --time=0-8:00:00 # D-HH:MM
+#SBATCH --account=def-zhijing
+#SBATCH --mem=64G
 #SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=1
 
@@ -26,6 +26,7 @@ MODEL_NAME=${2:-Qwen2.5-32B}
 TRACES_DIR="/home/wuroderi/links/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
 INPUT_JSON="${TRACES_DIR}/aligned_pairs.json"
 OUTPUT_ROOT_DIR="${TRACES_DIR}/patch_runs"
+#OUTPUT_ROOT_DIR="${TRACES_DIR}/patch_runs_nopair"
 
 # Check if input exists
 if [ ! -f "$INPUT_JSON" ]; then
@@ -43,5 +44,11 @@ python -u intervene_graph.py \
   --output-root-dir "$OUTPUT_ROOT_DIR" \
   --device cuda \
   --dtype float16 \
-  --no-plots
+  --patch-batch-size 16
 
+#python -u intervene_graph_nopair.py \
+  #--input-json "$INPUT_JSON" \
+  #--output-root-dir "$OUTPUT_ROOT_DIR" \
+  #--device cuda \
+  #--dtype float16 \
+  #--patch-batch-size 16

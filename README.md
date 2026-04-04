@@ -1,33 +1,41 @@
 # auto_computation_graph
 
+This directory implements the trace-generation and causal-patching pipeline for the hidden-variable experiments.
 
-generate_traces.py
-1. Generate the questions. Have q different questions. For each question, have f different formats. Randomly sample prerequisite values -- create about b different examples. For each each example, have a model answer the question with cot. 
-    - Ultimately have q\*f\*b different cot traces. 
-output: traces.json
+## Pipeline
 
-intervene_fix_traces.py
-2. Ensure the answer is correct first. 
-    - API calls to fix up generated text -- if answer is wrong, get them to fix the values. 
-output: fixed_traces.json
+1. Generate CoT traces with [generate_traces.py](generate_traces.py).
+   - Sample questions across all prompt formats.
+   - Save the raw traces to `traces.json`.
 
-intervene_generate_pairs.py
-3. Generate a counterfactual prerequisite data tuple for each cot trace. Recreate the cot trace with the counterfactual tuple (LLM can do this). 
-    1. First sample counterfactual values from the same distributions. 
-    2. Can pass in pervious numerical values to give pointers on where to substitute. 
-    3. Also return the modified numerical values. 
-output: paired_traces.json
+2. Validate the traces with [reject_traces.py](reject_traces.py).
+   - Truncate runaway continuations so only the first trace segment is inspected.
+   - Reject traces whose final answer is missing or outside tolerance.
+   - Save accepted traces to `reject_traces.json`.
 
-post_process_pairs.py
-4. Post-process pairs
-    - Pairs must have same number of tokens
-        - Easy for qwen tokenizer -- post process and grep values and fix source/base to have identical lengths of each value. 
+3. Branch into one of two patching paths.
+   - Path A, counterfactual patching:
+     - [intervene_generate_pairs.py](intervene_generate_pairs.py) creates counterfactual pairs.
+     - [post_process_pairs.py](post_process_pairs.py) aligns token lengths.
+     - [intervene_graph.py](intervene_graph.py) performs layer/token causal patching.
+    - Path B, direct trace patching:
+       - [intervene_graph_nopair.py](intervene_graph_nopair.py) takes `reject_traces.json` directly.
+     - It does not need a counterfactual trace; it injects Gaussian noise by default.
 
-intervene_graph.py
-5. Causal tracing
-    for each numerical value starting from the end (only cot values):
-        try patching every token at every layer and record the change in logprobs
-        create heatmap + log data
-    
+4. Build graphs from the patching matrices with [construct_graph.py](construct_graph.py).
+   - The output is a value-level causal graph built from the difference matrices.
 
-construct_graph.py
+## Outputs
+
+- `traces.json` from generation
+- `reject_traces.json` from validation/rejection
+- `paired_traces.json` from counterfactual pairing
+- `patch_runs/` from pairwise activation patching
+- `patch_solo/` from direct noise patching
+- `graphs/` from graph construction
+
+## Notes
+
+- The direct path is now supported by [intervene_graph_nopair.py](intervene_graph_nopair.py), which can read `reject_traces.json` directly.
+- The current branch is intentionally split so counterfactual patching and noise-based patching can be compared separately.
+- A later follow-up script should validate the constructed graphs with token-level patching.

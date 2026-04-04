@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=fix_traces
+#SBATCH --job-name=reject_traces
 #SBATCH --time=0-4:00:00
 #SBATCH --account=def-rgrosse
 #SBATCH --mem=64G
@@ -8,7 +8,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
-    echo "Usage: sbatch fix_traces.sh <experiment> [model_name]"
+    echo "Usage: sbatch reject_traces.sh <experiment> [model_name]"
     exit 1
 fi
 
@@ -25,6 +25,6 @@ if [ -d venv ]; then
     source venv/bin/activate
 fi
 
-python intervene_fix_traces.py \
+python reject_traces.py \
     --model-name "$model_name" \
     --experiment "$experiment"

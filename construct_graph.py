@@ -29,6 +29,188 @@ import numpy as np
 MATRIX_FILE_RE = re.compile(r"^matrix_(v(?P<vidx>\d+)|tail)_t(?P<trunc>\d+)\.json$")
 
 
+def load_aligned_pairs(aligned_pairs_path: Path) -> Dict[str, Dict]:
+    """Load aligned pairs from JSON file, indexed by pair_id."""
+    if not aligned_pairs_path.exists():
+        return {}
+    
+    try:
+        with open(aligned_pairs_path, "r") as f:
+            payload = json.load(f)
+        
+        pairs_dict = {}
+        pairs_list = payload.get("pairs", []) if isinstance(payload, dict) else payload
+        
+        for pair in pairs_list:
+            if not isinstance(pair, dict):
+                continue
+            pair_id = str(pair.get("pair_id", pair.get("id", "")))
+            if pair_id:
+                pairs_dict[pair_id] = pair
+        
+        return pairs_dict
+    except Exception as e:
+        print(f"Warning: Could not load aligned_pairs.json: {e}")
+        return {}
+
+
+def get_pair_trace(pair_id: str, aligned_pairs_dict: Dict[str, Dict]) -> Optional[str]:
+    """Extract the base trace text from a pair record."""
+    pair = aligned_pairs_dict.get(pair_id)
+    if not pair:
+        return None
+    
+    # Try various fields where the source text might be stored.
+    nested_pair = pair.get("pair", {}) if isinstance(pair.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+
+    trace_text = (
+        nested_source.get("generated_text") or
+        nested_source.get("text") or
+        pair.get("source_text") or
+        pair.get("source") or
+        pair.get("base_text") or
+        pair.get("prompt") or
+        ""
+    )
+    
+    return trace_text if trace_text else None
+
+
+def get_pair_record(pair_id: str, aligned_pairs_dict: Dict[str, Dict]) -> Optional[Dict]:
+    pair = aligned_pairs_dict.get(pair_id)
+    if isinstance(pair, dict):
+        return pair
+    return None
+
+
+def build_value_label_by_index(pair_record: Optional[Dict]) -> Dict[int, str]:
+    """Map graph value index (v0, v1, ...) to value_text from source trace values.
+
+    Value indices in patching are assigned from the end of the value list, so v0 is
+    the last detected numeric value in the source trace.
+    """
+    if not isinstance(pair_record, dict):
+        return {}
+
+    nested_pair = pair_record.get("pair", {}) if isinstance(pair_record.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+    values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
+
+    out: Dict[int, str] = {}
+    for vidx, value_obj in enumerate(reversed(values)):
+        if not isinstance(value_obj, dict):
+            continue
+        value_text = str(value_obj.get("value_text", "")).strip()
+        if value_text:
+            out[vidx] = value_text
+    return out
+
+
+def build_value_token_ranges_by_index(pair_record: Optional[Dict]) -> Dict[int, Tuple[int, int]]:
+    """Map graph value index (v0, v1, ...) to source token span [start, end)."""
+    if not isinstance(pair_record, dict):
+        return {}
+
+    nested_pair = pair_record.get("pair", {}) if isinstance(pair_record.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+    values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
+
+    out: Dict[int, Tuple[int, int]] = {}
+    for vidx, value_obj in enumerate(reversed(values)):
+        if not isinstance(value_obj, dict):
+            continue
+        ts = value_obj.get("token_start")
+        te = value_obj.get("token_end")
+        if isinstance(ts, int) and isinstance(te, int) and te > ts:
+            out[vidx] = (ts, te)
+    return out
+
+
+def build_value_alignment_line(pair_record: Optional[Dict], trace_text: str) -> Optional[str]:
+    """Build a monospaced line with vN labels aligned under the original value spans."""
+    if not isinstance(pair_record, dict):
+        return None
+
+    nested_pair = pair_record.get("pair", {}) if isinstance(pair_record.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+    text = str(trace_text or nested_source.get("generated_text", ""))
+    values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
+
+    if not text or not values:
+        return None
+
+    line = [" "] * len(text)
+    rev_values = list(reversed(values))
+    for vidx, value_obj in enumerate(rev_values):
+        if not isinstance(value_obj, dict):
+            continue
+        span_start = value_obj.get("span_start")
+        span_end = value_obj.get("span_end")
+        label = f"v{vidx}"
+        if not isinstance(span_start, int) or not isinstance(span_end, int):
+            continue
+
+        # Exact placement: write the label starting at the original span start.
+        if span_start < 0 or span_start >= len(text):
+            continue
+        for i, ch in enumerate(label):
+            pos = span_start + i
+            if pos < len(line):
+                line[pos] = ch
+
+    return "".join(line).rstrip()
+
+
+def build_truncation_label_row(graph: Dict, width: int = 120) -> str:
+    """Build a monospaced row of value labels positioned by truncation index.
+
+    Kept for graph-level summaries, but footer rendering now prefers value-span alignment.
+    """
+    nodes = graph.get("nodes", [])
+    if not nodes or width <= 0:
+        return ""
+
+    ordered_nodes = sorted(
+        nodes,
+        key=lambda n: (int(n.get("truncation_token_index", 0)), str(n.get("id", ""))),
+    )
+    max_trunc = max(int(n.get("truncation_token_index", 0)) for n in ordered_nodes)
+    max_trunc = max(1, max_trunc)
+
+    canvas = [" "] * width
+    occupied = [False] * width
+
+    for node in ordered_nodes:
+        trunc = int(node.get("truncation_token_index", 0))
+        value_indices = [int(v) for v in node.get("value_indices", [])]
+        if not value_indices:
+            continue
+
+        label = ",".join([f"v{vidx}" for vidx in value_indices])
+        if not label:
+            continue
+
+        anchor = int(round((trunc / max_trunc) * (width - 1)))
+        start = max(0, min(width - len(label), anchor - len(label) // 2))
+
+        # Shift right slightly if this label would collide with an earlier one.
+        placed = False
+        for offset in range(width):
+            candidate = min(width - len(label), start + offset)
+            if not any(occupied[candidate : candidate + len(label)]):
+                for i, ch in enumerate(label):
+                    canvas[candidate + i] = ch
+                    occupied[candidate + i] = True
+                placed = True
+                break
+        if not placed:
+            for i, ch in enumerate(label[:width]):
+                canvas[i] = ch
+
+    return "".join(canvas).rstrip()
+
+
 @dataclass
 class MatrixRecord:
     pair_id: str
@@ -61,7 +243,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--selection-method", choices=["topk", "quantile", "fdr"], default="fdr")
     p.add_argument("--top-k", type=int, default=5)
     p.add_argument("--quantile", type=float, default=0.9)
-    p.add_argument("--fdr-q", type=float, default=0.1)
+    p.add_argument("--fdr-q", type=float, default=0.5)
     p.add_argument("--min-tokens", type=int, default=1, help="Minimum number of selected token positions per child node.")
     p.add_argument(
         "--relative-edge-threshold",
@@ -269,14 +451,91 @@ def map_tokens_to_parent_nodes(
     return mapped
 
 
-def build_graph_for_pair(records: Dict[str, MatrixRecord], cfg: GraphBuildConfig) -> Dict:
+def _collapse_records_by_truncation(records: Dict[str, MatrixRecord]) -> Tuple[Dict[str, MatrixRecord], Dict[str, List[MatrixRecord]]]:
+    by_trunc: Dict[int, List[MatrixRecord]] = {}
+    for rec in records.values():
+        by_trunc.setdefault(rec.truncation_token_index, []).append(rec)
+
+    collapsed: Dict[str, MatrixRecord] = {}
+    grouped_by_canonical: Dict[str, List[MatrixRecord]] = {}
+
+    for trunc, group in by_trunc.items():
+        group_sorted = sorted(
+            group,
+            key=lambda r: (r.value_index < 0, r.value_index if r.value_index >= 0 else 10**9, r.node_id),
+        )
+        canonical = group_sorted[0]
+
+        same_shape = all(g.diff_delta_matrix.shape == canonical.diff_delta_matrix.shape for g in group_sorted)
+        if same_shape and len(group_sorted) > 1:
+            merged_diff = np.mean(np.stack([g.diff_delta_matrix for g in group_sorted], axis=0), axis=0).astype(np.float32)
+        else:
+            merged_diff = canonical.diff_delta_matrix
+
+        collapsed_rec = MatrixRecord(
+            pair_id=canonical.pair_id,
+            node_id=canonical.node_id,
+            value_index=canonical.value_index,
+            truncation_token_index=trunc,
+            position_indices=list(canonical.position_indices),
+            diff_delta_matrix=merged_diff,
+        )
+        collapsed[collapsed_rec.node_id] = collapsed_rec
+        grouped_by_canonical[collapsed_rec.node_id] = group_sorted
+
+    return collapsed, grouped_by_canonical
+
+
+def build_graph_for_pair(
+    records: Dict[str, MatrixRecord],
+    cfg: GraphBuildConfig,
+    value_label_by_index: Optional[Dict[int, str]] = None,
+    value_token_ranges_by_index: Optional[Dict[int, Tuple[int, int]]] = None,
+) -> Dict:
+    if value_label_by_index is None:
+        value_label_by_index = {}
+    if value_token_ranges_by_index is None:
+        value_token_ranges_by_index = {}
+
+    records, grouped_by_canonical = _collapse_records_by_truncation(records)
+
+    node_to_value_indices: Dict[str, List[int]] = {}
+    node_to_token_positions: Dict[str, set] = {}
+    node_to_trunc: Dict[str, int] = {}
+    for nid, rec in records.items():
+        grouped = grouped_by_canonical.get(nid, [rec])
+        vidxs = sorted({r.value_index for r in grouped if r.value_index >= 0})
+        node_to_value_indices[nid] = vidxs
+        node_to_trunc[nid] = rec.truncation_token_index
+
+        token_positions = set()
+        for vidx in vidxs:
+            token_range = value_token_ranges_by_index.get(vidx)
+            if token_range is None:
+                continue
+            start, end = token_range
+            if end > start:
+                token_positions.update(range(start, end))
+        node_to_token_positions[nid] = token_positions
+
+    # Include values that have aligned token spans but no patching record (e.g.,
+    # prompt values). These can still contribute as parent-only nodes.
+    for vidx, token_range in value_token_ranges_by_index.items():
+        nid = f"v{vidx}"
+        if nid in node_to_value_indices:
+            continue
+        start, end = token_range
+        if end <= start:
+            continue
+        node_to_value_indices[nid] = [vidx]
+        node_to_token_positions[nid] = set(range(start, end))
+        node_to_trunc[nid] = int(start)
+
     if "v0" not in records:
         # If v0 does not exist, use the node with largest truncation index as root.
         root = max(records.values(), key=lambda r: r.truncation_token_index).node_id
     else:
         root = "v0"
-
-    node_to_trunc = {nid: rec.truncation_token_index for nid, rec in records.items()}
 
     visited = set()
     frontier: List[Tuple[str, int]] = [(root, 0)]
@@ -306,22 +565,38 @@ def build_graph_for_pair(records: Dict[str, MatrixRecord], cfg: GraphBuildConfig
             min_tokens=cfg.min_tokens,
         )
 
-        selected_token_positions = [rec.position_indices[i] for i in token_idx_local if 0 <= i < len(rec.position_indices)]
-        selected_token_scores = [float(abs(scores[i])) for i in token_idx_local]
+        child_trunc = rec.truncation_token_index
 
-        mapped_parents = map_tokens_to_parent_nodes(
-            token_positions=selected_token_positions,
-            child_node_id=child,
-            node_to_trunc=node_to_trunc,
-        )
+        # Exclude the token immediately before truncation since it directly predicts
+        # the truncated token and can dominate with a mechanism unrelated to parent value reuse.
+        selected_pairs: List[Tuple[int, float]] = []
+        for i in token_idx_local:
+            if not (0 <= i < len(rec.position_indices)):
+                continue
+            pos = rec.position_indices[i]
+            if pos == child_trunc - 1:
+                continue
+            selected_pairs.append((pos, float(abs(scores[i]))))
 
-        # Aggregate token evidence into parent edge weights.
+        selected_token_positions = [p for p, _ in selected_pairs]
+        selected_token_scores = [w for _, w in selected_pairs]
+
+        # Parent candidates must occur earlier in sequence than child.
+        parent_nodes = [nid for nid, t in node_to_trunc.items() if t < child_trunc and nid != child]
+
+        # Aggregate token evidence into parent edge weights using only tokens that
+        # lie within each parent node's own value token span(s).
         parent_bucket: Dict[str, List[float]] = {}
-        for pnode, w in zip(mapped_parents, selected_token_scores):
-            parent_bucket.setdefault(pnode, []).append(w)
+        for pnode in parent_nodes:
+            parent_positions = node_to_token_positions.get(pnode, set())
+            if not parent_positions:
+                continue
+            weights = [w for pos, w in selected_pairs if pos in parent_positions]
+            if weights:
+                parent_bucket[pnode] = weights
 
         if parent_bucket:
-            parent_strength = {p: float(np.mean(ws)) for p, ws in parent_bucket.items()}
+            parent_strength = {p: float(np.max(ws)) for p, ws in parent_bucket.items()}
             max_w = max(parent_strength.values())
             keep_thresh = cfg.relative_edge_threshold * max_w
             parent_strength = {p: w for p, w in parent_strength.items() if w >= keep_thresh}
@@ -354,15 +629,45 @@ def build_graph_for_pair(records: Dict[str, MatrixRecord], cfg: GraphBuildConfig
                 "mapped_parents": [],
             }
 
-    graph_nodes = [
-        {
-            "id": nid,
-            "label": nid,
-            "truncation_token_index": rec.truncation_token_index,
-            "value_index": rec.value_index,
+    # Add placeholder stats for parent-only synthetic nodes.
+    for nid, trunc in node_to_trunc.items():
+        if nid in node_stats:
+            continue
+        node_stats[nid] = {
+            "truncation_token_index": int(trunc),
+            "n_token_positions": 0,
+            "n_selected_tokens": 0,
+            "selected_token_positions": [],
+            "selected_token_scores_abs": [],
+            "mapped_parents": [],
         }
-        for nid, rec in sorted(records.items(), key=lambda kv: kv[1].truncation_token_index)
-    ]
+
+    graph_nodes = []
+    for nid, trunc in sorted(node_to_trunc.items(), key=lambda kv: kv[1]):
+        rec = records.get(nid)
+        if rec is not None:
+            value_index = rec.value_index
+            alias_node_ids = [r.node_id for r in grouped_by_canonical.get(nid, [rec])]
+        else:
+            vidxs = node_to_value_indices.get(nid, [])
+            value_index = vidxs[0] if vidxs else -1
+            alias_node_ids = [nid]
+
+        graph_nodes.append(
+            {
+                "id": nid,
+                "label": (f"{','.join([f'v{idx}' for idx in node_to_value_indices.get(nid, [])])}" if node_to_value_indices.get(nid) else nid),
+                "truncation_token_index": int(trunc),
+                "value_index": value_index,
+                "value_indices": node_to_value_indices.get(nid, []),
+                "value_texts": [
+                    value_label_by_index[idx]
+                    for idx in node_to_value_indices.get(nid, [])
+                    if idx in value_label_by_index
+                ],
+                "alias_node_ids": alias_node_ids,
+            }
+        )
 
     graph_edges = [
         {
@@ -381,12 +686,44 @@ def build_graph_for_pair(records: Dict[str, MatrixRecord], cfg: GraphBuildConfig
     }
 
 
-def to_dot(pair_name: str, graph: Dict) -> str:
+def _dot_escape(text: str) -> str:
+    # Preserve DOT newline escapes ("\\n") while escaping quotes and raw newlines.
+    return text.replace('"', '\\"').replace("\n", "\\n")
+
+
+def to_dot(pair_name: str, graph: Dict, trace_text: Optional[str] = None, truncation_labels_text: Optional[str] = None) -> str:
     lines = [f"digraph {pair_name} {{", "  rankdir=RL;"]
+    if trace_text or truncation_labels_text:
+        label_parts: List[str] = []
+        if trace_text:
+            compact_trace = " ".join(str(trace_text).split())
+            clipped = compact_trace[:600] + ("..." if len(compact_trace) > 600 else "")
+            label_parts.append(f"Base Trace: {clipped}")
+        if truncation_labels_text:
+            label_parts.append("")
+            label_parts.append(truncation_labels_text)
+        dot_label = "\\n".join(label_parts)
+        lines.extend(
+            [
+                '  labelloc="b";',
+                '  labeljust="l";',
+                f'  label="{_dot_escape(dot_label)}";',
+            ]
+        )
     for node in graph["nodes"]:
         nid = node["id"]
         trunc = node["truncation_token_index"]
-        lines.append(f'  "{nid}" [label="{nid} (t={trunc})"];')
+        value_indices = node.get("value_indices", [])
+        value_texts = node.get("value_texts", [])
+        vlabel = ",".join([f"v{int(i)}" for i in value_indices]) if value_indices else nid
+        tlabel = " | ".join([str(v) for v in value_texts[:2]])
+        if len(value_texts) > 2:
+            tlabel += " | ..."
+        if tlabel:
+            label = f"{vlabel}\\n{tlabel}\\n(t={trunc})"
+        else:
+            label = f"{vlabel}\\n(t={trunc})"
+        lines.append(f'  "{nid}" [label="{_dot_escape(label)}"];')
     for edge in graph["edges"]:
         src = edge["source"]
         dst = edge["target"]
@@ -407,9 +744,16 @@ def _render_with_graphviz(dot_file: Path, out_file: Path, fmt: str, layout: str)
         return False
 
 
-def _render_with_matplotlib(graph: Dict, out_file: Path, dpi: int) -> bool:
+def _render_with_matplotlib(
+    graph: Dict,
+    out_file: Path,
+    dpi: int,
+    trace_text: Optional[str] = None,
+    value_alignment_text: Optional[str] = None,
+) -> bool:
     try:
         import matplotlib.pyplot as plt
+        from textwrap import wrap
     except Exception:
         return False
 
@@ -434,7 +778,12 @@ def _render_with_matplotlib(graph: Dict, out_file: Path, dpi: int) -> bool:
             y = (m - 1) / 2.0 - yi
             pos[nid] = (float(xi), float(y))
 
-    fig, ax = plt.subplots(figsize=(10, max(4, len(nodes) * 0.8)))
+    # Determine figure size; add space for trace if present
+    fig_height = max(4, len(nodes) * 0.8)
+    if trace_text or value_alignment_text:
+        fig_height += 2.2  # Extra space for trace display
+    
+    fig, ax = plt.subplots(figsize=(10, fig_height))
 
     weights = [float(e.get("weight", 1.0)) for e in edges]
     max_w = max(weights) if weights else 1.0
@@ -463,9 +812,19 @@ def _render_with_matplotlib(graph: Dict, out_file: Path, dpi: int) -> bool:
     for n in nodes:
         nid = str(n["id"])
         trunc = int(n.get("truncation_token_index", 0))
+        value_indices = n.get("value_indices", [])
+        value_texts = n.get("value_texts", [])
+        vlabel = ",".join([f"v{int(i)}" for i in value_indices]) if value_indices else nid
+        value_line = " | ".join([str(v) for v in value_texts[:2]])
+        if len(value_texts) > 2:
+            value_line += " | ..."
         x, y = pos[nid]
         ax.scatter([x], [y], s=420, zorder=3)
-        ax.text(x, y, f"{nid}\nt={trunc}", fontsize=8, ha="center", va="center", color="white", zorder=4)
+        if value_line:
+            node_text = f"{vlabel}\n{value_line}\nt={trunc}"
+        else:
+            node_text = f"{vlabel}\nt={trunc}"
+        ax.text(x, y, node_text, fontsize=8, ha="center", va="center", color="white", zorder=4)
 
     ax.set_title("Value Causal Graph")
     ax.set_axis_off()
@@ -473,14 +832,44 @@ def _render_with_matplotlib(graph: Dict, out_file: Path, dpi: int) -> bool:
     ys = [xy[1] for xy in pos.values()]
     ax.set_xlim(min(xs) - 0.8, max(xs) + 0.8)
     ax.set_ylim(min(ys) - 1.0, max(ys) + 1.0)
+    
+    # Add base trace text at bottom if available
+    if trace_text or value_alignment_text:
+        footer_parts: List[str] = []
+        if trace_text:
+            footer_parts.append(f"Base Trace: {trace_text}")
+        if value_alignment_text:
+            footer_parts.append("")
+            footer_parts.append(value_alignment_text)
+        footer_text = "\n".join(footer_parts)
+        fig.text(
+            0.5, 0.02,
+            footer_text,
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            family="monospace",
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="lightgray", alpha=0.8),
+        )
+    
     plt.tight_layout()
     out_file.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_file, dpi=dpi)
+    fig.savefig(out_file, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return True
 
 
-def render_graph(pair_name: str, graph: Dict, dot_file: Path, out_dir: Path, fmt: str, layout: str, dpi: int) -> Optional[Path]:
+def render_graph(
+    pair_name: str,
+    graph: Dict,
+    dot_file: Path,
+    out_dir: Path,
+    fmt: str,
+    layout: str,
+    dpi: int,
+    trace_text: Optional[str] = None,
+    value_alignment_text: Optional[str] = None,
+) -> Optional[Path]:
     if fmt == "none":
         return None
 
@@ -490,7 +879,13 @@ def render_graph(pair_name: str, graph: Dict, dot_file: Path, out_dir: Path, fmt
 
     # Fallback only supports png.
     if fmt == "png":
-        ok = _render_with_matplotlib(graph=graph, out_file=out_file, dpi=dpi)
+        ok = _render_with_matplotlib(
+            graph=graph,
+            out_file=out_file,
+            dpi=dpi,
+            trace_text=trace_text,
+            value_alignment_text=value_alignment_text,
+        )
         if ok:
             return out_file
 
@@ -524,6 +919,12 @@ def main() -> None:
     if not patch_runs_dir.exists():
         raise FileNotFoundError(f"patch-runs directory not found: {patch_runs_dir}")
 
+    # Load aligned pairs from parent directory (if available)
+    aligned_pairs_path = patch_runs_dir.parent / "aligned_pairs.json"
+    aligned_pairs_dict = load_aligned_pairs(aligned_pairs_path)
+    if aligned_pairs_dict:
+        print(f"Loaded {len(aligned_pairs_dict)} pair traces from {aligned_pairs_path}")
+
     pair_dirs = [p for p in sorted(patch_runs_dir.glob("pair*")) if p.is_dir()]
     if args.pair_id is not None:
         wanted = normalize_pair_dir_name(args.pair_id)
@@ -556,7 +957,17 @@ def main() -> None:
             print(f"[{pair_name}] No matrix records found, skipping.")
             continue
 
-        graph = build_graph_for_pair(records=records, cfg=cfg)
+        pair_id = pair_name.replace("pair", "")
+        pair_record = get_pair_record(pair_id, aligned_pairs_dict)
+        value_label_by_index = build_value_label_by_index(pair_record)
+        value_token_ranges_by_index = build_value_token_ranges_by_index(pair_record)
+
+        graph = build_graph_for_pair(
+            records=records,
+            cfg=cfg,
+            value_label_by_index=value_label_by_index,
+            value_token_ranges_by_index=value_token_ranges_by_index,
+        )
 
         pair_out_dir = output_dir / pair_name
         pair_out_dir.mkdir(parents=True, exist_ok=True)
@@ -564,10 +975,18 @@ def main() -> None:
         graph_json = pair_out_dir / "graph.json"
         dot_file = pair_out_dir / "graph.dot"
 
+        trace_text = get_pair_trace(pair_id, aligned_pairs_dict)
+        value_alignment_text = build_value_alignment_line(pair_record, trace_text or "")
+
+        if trace_text:
+            print(f"[{pair_name}] trace text loaded ({len(trace_text)} chars)")
+        else:
+            print(f"[{pair_name}] trace text missing")
+
         with open(graph_json, "w") as f:
             json.dump(graph, f, indent=2)
         with open(dot_file, "w") as f:
-            f.write(to_dot(pair_name, graph))
+            f.write(to_dot(pair_name, graph, trace_text=trace_text, truncation_labels_text=value_alignment_text))
 
         rendered = render_graph(
             pair_name=pair_name,
@@ -577,6 +996,8 @@ def main() -> None:
             fmt=args.render,
             layout=args.layout,
             dpi=max(72, args.dpi),
+            trace_text=trace_text,
+            value_alignment_text=value_alignment_text,
         )
 
         summary["pairs"].append(

@@ -38,6 +38,8 @@ parser.add_argument('--n_prompts', type=int, default=50,
                     help='Number of prompts to generate (will be split across formats)')
 parser.add_argument('--max_new_tokens', type=int, default=256,
                     help='Maximum tokens to generate per prompt')
+parser.add_argument('--batch_size', type=int, default=4,
+                    help='Number of prompts to generate per model forward pass')
 parser.add_argument('--temperature', type=float, default=0.7)
 parser.add_argument('--top_p', type=float, default=0.9)
 parser.add_argument('--seed', type=int, default=42)
@@ -45,6 +47,7 @@ args = parser.parse_args()
 
 # Set random seed for reproducibility
 torch.manual_seed(args.seed)
+#np.random.seed(args.seed)
 
 # Output directory
 model_name = Path(args.model_path).name
@@ -62,6 +65,7 @@ print(f"Experiment: {args.experiment}")
 print(f"Model: {args.model_path}")
 print(f"Output: {OUTPUT_DIR}")
 print(f"Prompts to generate: {args.n_prompts}")
+print(f"Batch size: {args.batch_size}")
 print(f"Max new tokens: {args.max_new_tokens}")
 print()
 
@@ -80,6 +84,10 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     low_cpu_mem_usage=True,
 )
+
+if tokenizer.pad_token_id is None:
+    tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = 'left'
 
 print(f"Model loaded: {model.config.num_hidden_layers} layers, {model.config.hidden_size} dimensions\n")
 
@@ -159,6 +167,40 @@ def generate_trace(prompt_text, model, tokenizer, max_new_tokens=256):
         'generated_text': generated_text,
     }
 
+
+def generate_trace_batch(prompt_texts, model, tokenizer, max_new_tokens=256):
+    """Generate a batch of CoT responses in one forward pass."""
+    inputs = tokenizer(prompt_texts, return_tensors="pt", padding=True).to(model.device)
+    prompt_lengths = inputs['attention_mask'].sum(dim=1).tolist()
+
+    print(f"    Generating batch of {len(prompt_texts)} prompts (max {max_new_tokens} tokens)...", end='', flush=True)
+
+    with torch.inference_mode():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            return_dict_in_generate=True,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    batch_traces = []
+    for idx, generated_ids in enumerate(outputs.sequences):
+        token_ids = generated_ids.cpu().tolist()
+        token_strings = [tokenizer.decode([tid]) for tid in token_ids]
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=False)
+        batch_traces.append(
+            {
+                'tokens': token_ids,
+                'token_strings': token_strings,
+                'prompt_length': int(prompt_lengths[idx]),
+                'generated_text': generated_text,
+            }
+        )
+
+    print(f" [Generated {len(batch_traces)} traces]")
+    return batch_traces
+
 # ==========================================
 # MAIN GENERATION LOOP
 # ==========================================
@@ -192,32 +234,38 @@ print(f"Generated {len(prompts_data)} prompts\n")
 
 # Generate traces
 all_traces = []
+batch_size = max(1, int(args.batch_size))
 
-for idx, prompt_data in enumerate(tqdm(prompts_data, desc="Generating traces")):
-    print(f"\n[{idx+1}/{len(prompts_data)}] Prompt: {prompt_data['prompt'][:80]}...")
-    
-    trace = generate_trace(
-        prompt_data['prompt'], 
+for batch_start in tqdm(range(0, len(prompts_data), batch_size), desc="Generating batches"):
+    batch_prompts = prompts_data[batch_start:batch_start + batch_size]
+    batch_prompt_texts = [prompt_data['prompt'] for prompt_data in batch_prompts]
+
+    batch_traces = generate_trace_batch(
+        batch_prompt_texts,
         model,
         tokenizer,
-        max_new_tokens=args.max_new_tokens
+        max_new_tokens=args.max_new_tokens,
     )
-    
-    # Combine prompt metadata with trace data
-    full_trace = {
-        'id': idx,
-        **prompt_data,  # Includes: prompt, format_id, variables, hidden variable, expected answer
-        **trace  # Includes: tokens, token_strings, prompt_length, generated_text
-    }
-    
-    all_traces.append(full_trace)
-    
-    # Save intermediate traces every 50 prompts
-    if (idx + 1) % 50 == 0:
-        traces_file = OUTPUT_DIR / 'traces.json'
-        with open(traces_file, 'w') as f:
-            json.dump(all_traces, f, indent=2)
-        print(f"\n  Saved intermediate traces to {traces_file}")
+
+    for offset, (prompt_data, trace) in enumerate(zip(batch_prompts, batch_traces)):
+        idx = batch_start + offset
+        print(f"\n[{idx+1}/{len(prompts_data)}] Prompt: {prompt_data['prompt'][:80]}...")
+
+        # Combine prompt metadata with trace data
+        full_trace = {
+            'id': idx,
+            **prompt_data,  # Includes: prompt, format_id, variables, hidden variable, expected answer
+            **trace  # Includes: tokens, token_strings, prompt_length, generated_text
+        }
+
+        all_traces.append(full_trace)
+
+        # Save intermediate traces every 50 prompts
+        if (idx + 1) % 50 == 0:
+            traces_file = OUTPUT_DIR / 'traces.json'
+            with open(traces_file, 'w') as f:
+                json.dump(all_traces, f, indent=2)
+            print(f"\n  Saved intermediate traces to {traces_file}")
 
 # ==========================================
 # SAVE FINAL RESULTS

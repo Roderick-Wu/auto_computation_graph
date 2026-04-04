@@ -20,7 +20,13 @@ if [ ! -d "$scratch_root" ]; then
     scratch_root="$HOME/scratch"
 fi
 
-traces_json="$scratch_root/traces/$model_name/$experiment/fixed_traces.json"
+traces_json="$scratch_root/traces/$model_name/$experiment/reject_traces.json"
+if [ ! -f "$traces_json" ]; then
+    legacy_traces_json="$scratch_root/traces/$model_name/$experiment/fixed_traces.json"
+    if [ -f "$legacy_traces_json" ]; then
+        traces_json="$legacy_traces_json"
+    fi
+fi
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 

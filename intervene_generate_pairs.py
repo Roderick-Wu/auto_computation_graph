@@ -1,8 +1,8 @@
 """
-Generate counterfactual paired traces from fixed traces JSON.
+Generate counterfactual paired traces from reject-traces JSON.
 
 Pipeline role:
-1. Load fixed_traces.json produced by intervene_fix_traces.py
+1. Load reject_traces.json produced by reject_traces.py
 2. Sample a counterfactual metadata tuple from the same prompt generator family
 3. Ask an API to rewrite the base trace with counterfactual values only
 4. Tokenize generated text and extract numeric value spans for downstream graphing
@@ -42,6 +42,9 @@ def resolve_default_traces_json(model_name: str, experiment: str) -> Path:
     scratch_root = Path.home() / "links" / "scratch"
     if not scratch_root.exists():
         scratch_root = Path.home() / "scratch"
+    preferred = scratch_root / "traces" / model_name / experiment / "reject_traces.json"
+    if preferred.exists():
+        return preferred
     return scratch_root / "traces" / model_name / experiment / "fixed_traces.json"
 
 
@@ -57,14 +60,14 @@ def resolve_default_tokenizer_path(model_name: str) -> Path:
 
 
 def load_trace_list_from_json(path: Path) -> List[Dict[str, Any]]:
-    """Load trace list from fixed_traces payload (dict containing 'traces')."""
+    """Load trace list from reject_traces payload (dict containing 'traces')."""
     with open(path, "r") as f:
         payload = json.load(f)
 
     if isinstance(payload, dict) and isinstance(payload.get("traces"), list):
         return payload["traces"]
 
-    raise ValueError("Expected fixed_traces JSON payload containing a top-level 'traces' list")
+    raise ValueError("Expected reject_traces JSON payload containing a top-level 'traces' list")
 
 
 def get_prompt_experiment_name(experiment: str) -> str:
@@ -396,10 +399,10 @@ def tokenize_text(tokenizer: Any, text: Optional[str]) -> Tuple[List[int], List[
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate paired source/counterfactual traces from fixed_traces.json.")
+    parser = argparse.ArgumentParser(description="Generate paired source/counterfactual traces from reject_traces.json.")
     parser.add_argument("--model-name", type=str, default="Qwen2.5-72B", help="Model folder name used for tokenizer and output path.")
     parser.add_argument("--experiment", type=str, default="velocity", help="Experiment name used in default trace/output paths.")
-    parser.add_argument("--traces-json", type=Path, default=None, help="Path to fixed_traces.json produced by intervene_fix_traces.py.")
+    parser.add_argument("--traces-json", type=Path, default=None, help="Path to reject_traces.json produced by reject_traces.py.")
     parser.add_argument("--max-traces", type=int, default=None, help="Optional cap on number of loaded traces to process.")
     parser.add_argument("--output-json", type=Path, default=None, help="Output path for paired traces JSON.")
     parser.add_argument("--tokenizer-path", type=Path, default=None, help="Tokenizer path for tokenizing generated traces.")

@@ -1,26 +1,23 @@
-"""Causal activation patching runner.
+"""Causal activation noise-patching runner.
 
-For each experiment entry (either precomputed experiments or built from aligned pairs):
-1. Run SOURCE forward pass and capture all layer activations.
-2. Run TARGET forward pass and score log P(next SOURCE token) at each position.
-3. For every layer and token position, patch SOURCE->TARGET at that single cell,
-     rerun TARGET, and measure delta logprob.
-4. Save heatmaps per numeric value within each pair.
+For each experiment entry built from a base trace:
+1. Run the clean prompt forward pass and capture all layer activations.
+2. Score the true next token at the truncation point.
+3. For every layer and token position before truncation, replace that single
+   activation cell with noise (Gaussian by default) and measure delta logprob.
+4. Save one heatmap and JSON payload per numeric value in the CoT.
 
 Outputs are organized as:
     OUTPUT_ROOT_DIR/
         pair0/
-            source_heatmap_v0_t<trunc_idx>.png
-            base_heatmap_v0_t<trunc_idx>.png
-            diff_heatmap_v0_t<trunc_idx>.png
-            matrix_v0_t<trunc_idx>.json
-            source_heatmap_v1_t<trunc_idx>.png
-            ... (one set per numeric value in CoT)
+            noise_heatmap_v0_t<trunc_idx>.png
+            pair_matrices.json
         pair1/
             ...
 """
 
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,13 +33,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # GLOBAL CONFIGURATION - EDIT THESE
 # ============================================================================
 
-# Input can be either:
+# Input can be one of:
 #  - legacy truncated experiments payload with top-level "experiments"
+#  - reject traces payload with top-level "traces"
 #  - aligned pairs payload with top-level "pairs"
 INPUT_JSON = Path("/home/wuroderi/links/scratch/traces/Qwen2.5-32B/velocity/aligned_pairs.json")
 
 # Output directory (contains per-experiment folders)
-OUTPUT_ROOT_DIR = Path("/home/wuroderi/links/scratch/traces/Qwen2.5-32B/velocity/patch_runs")
+OUTPUT_ROOT_DIR = Path("/home/wuroderi/links/scratch/traces/Qwen2.5-32B/velocity/patch_solo")
 
 # Summary JSON across all runs
 OUTPUT_SUMMARY_JSON = OUTPUT_ROOT_DIR / "patching_summary.json"
@@ -63,6 +61,12 @@ TOKEN_POSITIONS_TO_PATCH = None
 # Number of token positions to patch in one forward pass for a fixed layer.
 PATCH_BATCH_SIZE = 16
 
+# Noise configuration for patched activations
+NOISE_MODE = "gaussian"
+NOISE_SCALE = 1.0
+NOISE_SEED = 0
+NOISE_SAMPLES_PER_CELL = 5
+
 # Device for computation
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -70,7 +74,6 @@ DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 MODEL_PATH = "/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Qwen2.5-32B"
 TOKENIZER_PATH = MODEL_PATH
 SAVE_PLOTS = True
-RESUME = True
 
 
 def parse_int_list(raw: Optional[str]) -> Optional[List[int]]:
@@ -109,65 +112,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-summary-json", type=Path, default=None, help="Optional summary JSON path (default: <output-root-dir>/patching_summary.json).")
 
     parser.add_argument("--experiment-indices", type=str, default=None, help="Comma-separated experiment indices, e.g. '0,1,2'.")
-    parser.add_argument("--experiment-ids", type=str, default=None, help="Comma-separated experiment IDs, e.g. 'pair1_value3,pair2_value0'.")
+    parser.add_argument("--experiment-ids", type=str, default=None, help="Comma-separated experiment IDs. Numeric values are also accepted and treated as experiment index and pair_id fallbacks.")
     parser.add_argument("--layers-to-patch", type=str, default=None, help="Comma-separated layer indices, or 'all'.")
     parser.add_argument("--token-positions-to-patch", type=str, default=None, help="Comma-separated token positions, or 'all'.")
-    parser.add_argument("--patch-batch-size", type=int, default=PATCH_BATCH_SIZE, help="Number of token positions to patch per forward pass for a fixed layer.")
 
     parser.add_argument("--model-path", type=str, default=MODEL_PATH, help="Model path for AutoModelForCausalLM.")
     parser.add_argument("--tokenizer-path", type=str, default=TOKENIZER_PATH, help="Tokenizer path for AutoTokenizer.")
     parser.add_argument("--device", type=str, default=DEVICE, help="Device to run on (e.g., cuda, cpu).")
     parser.add_argument("--dtype", type=str, default="float16" if DTYPE == torch.float16 else "float32", choices=["float16", "float32"], help="Model dtype.")
+    parser.add_argument("--noise-mode", type=str, default=NOISE_MODE, choices=["gaussian", "zero"], help="Noise replacement mode for patched activations.")
+    parser.add_argument("--noise-scale", type=float, default=NOISE_SCALE, help="Scale factor applied to Gaussian noise.")
+    parser.add_argument("--noise-seed", type=int, default=NOISE_SEED, help="Base seed for deterministic per-cell noise.")
+    parser.add_argument("--noise-samples-per-cell", type=int, default=NOISE_SAMPLES_PER_CELL, help="Number of noisy patches to average per (layer, token) cell.")
+    parser.add_argument("--patch-batch-size", type=int, default=PATCH_BATCH_SIZE, help="Number of token positions to patch per forward pass for a fixed layer.")
     parser.add_argument("--no-plots", action="store_true", help="Disable heatmap PNG generation and only write JSON outputs.")
-    parser.add_argument("--no-resume", action="store_true", help="Disable resume behavior and recompute all selected experiments.")
     return parser
-
-
-def load_existing_pair_payloads(output_root_dir: Path) -> Dict[str, Dict]:
-    existing: Dict[str, Dict] = {}
-    if not output_root_dir.exists():
-        return existing
-
-    for pair_dir in sorted(output_root_dir.glob("pair*")):
-        if not pair_dir.is_dir():
-            continue
-        pair_json = pair_dir / "pair_matrices.json"
-        if not pair_json.exists():
-            continue
-        try:
-            with open(pair_json, "r") as f:
-                payload = json.load(f)
-            if isinstance(payload, dict) and isinstance(payload.get("entries"), list):
-                existing[pair_dir.name] = payload
-        except Exception as e:
-            print(f"  Warning: failed to load existing pair JSON {pair_json}: {e}")
-    return existing
-
-
-def collect_completed_experiment_ids(pair_payloads: Dict[str, Dict]) -> set:
-    completed = set()
-    for payload in pair_payloads.values():
-        for entry in payload.get("entries", []):
-            exp_id = entry.get("experiment_id")
-            if isinstance(exp_id, str):
-                completed.add(exp_id)
-    return completed
-
-
-def merge_run_records(existing_runs: List[Dict], new_runs: List[Dict]) -> List[Dict]:
-    merged_by_exp: Dict[str, Dict] = {}
-    for rec in existing_runs:
-        exp_id = rec.get("experiment_id")
-        if isinstance(exp_id, str):
-            merged_by_exp[exp_id] = rec
-    for rec in new_runs:
-        exp_id = rec.get("experiment_id")
-        if isinstance(exp_id, str):
-            merged_by_exp[exp_id] = rec
-
-    merged = list(merged_by_exp.values())
-    merged.sort(key=lambda r: (str(r.get("pair_id", "")), int(r.get("truncation_token_index", -1))), reverse=True)
-    return merged
 
 
 def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
@@ -179,21 +138,16 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
     for pidx, pair in enumerate(pairs):
         pair_id = pair.get("id", pidx)
         source_block = pair.get("pair", {}).get("source", {})
-        cf_block = pair.get("pair", {}).get("counterfactual", {})
 
         # Skip pairs that post-processing flagged as tokenization/alignment failures.
         token_counts_equal = pair.get("post_process", {}).get("token_counts_equal")
         if token_counts_equal is False:
             continue
 
-        # Terminology normalization: patch SOURCE onto BASE.
-        # BASE := original/source trace, SOURCE := counterfactual trace.
-        base_token_ids = source_block.get("tokens") if isinstance(source_block.get("tokens"), list) else []
-        source_token_ids = cf_block.get("tokens") if isinstance(cf_block.get("tokens"), list) else []
+        # Use the source/original trace only. The counterfactual side is ignored.
+        source_token_ids = source_block.get("tokens") if isinstance(source_block.get("tokens"), list) else []
         source_text = source_block.get("generated_text", "")
-        if not base_token_ids or not source_token_ids:
-            continue
-        if len(base_token_ids) != len(source_token_ids):
+        if not source_token_ids:
             continue
 
         # Find where the CoT starts ("Answer (step-by-step)")
@@ -238,50 +192,27 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
             for v_idx, mv in enumerate(cot_values):
                 pos = mv.get("position")
                 src_meta = mv.get("source", {})
-                cf_meta = mv.get("counterfactual", {})
 
                 src_tok_start = src_meta.get("token_start")
                 src_tok_end = src_meta.get("token_end")
-                cf_tok_start = cf_meta.get("token_start")
-                cf_tok_end = cf_meta.get("token_end")
-
-                if not isinstance(src_tok_start, int) or not isinstance(cf_tok_start, int):
+                if not isinstance(src_tok_start, int):
                     continue
 
-                # BASE sequence comes from original/source block.
-                # SOURCE sequence comes from counterfactual block.
-                base_tok = src_tok_start
-                source_tok = cf_tok_start
-
-                # Prefer scoring the first differing token inside the matched numeric span.
-                if isinstance(src_tok_end, int) and isinstance(cf_tok_end, int):
-                    span_start = max(0, min(source_tok, base_tok))
-                    span_end = min(len(source_token_ids), len(base_token_ids), src_tok_end, cf_tok_end)
+                # Prefer scoring the first token inside the matched numeric span.
+                if isinstance(src_tok_end, int):
+                    span_start = max(0, src_tok_start)
+                    span_end = min(len(source_token_ids), src_tok_end)
                 else:
-                    span_start = max(0, min(source_tok, base_tok))
+                    span_start = max(0, src_tok_start)
                     span_end = span_start + 1
 
                 trunc_idx = span_start
-                found_diff = False
-                for t in range(span_start, span_end):
-                    if source_token_ids[t] != base_token_ids[t]:
-                        trunc_idx = t
-                        found_diff = True
-                        break
-
-                # If span tokens are identical (rare, due to formatting/padding),
-                # advance to the next differing token in the remaining sequence.
-                if not found_diff:
-                    usable_len = min(len(source_token_ids), len(base_token_ids))
-                    for t in range(span_end, usable_len):
-                        if source_token_ids[t] != base_token_ids[t]:
-                            trunc_idx = t
-                            found_diff = True
-                            break
+                if trunc_idx < span_end and trunc_idx >= len(source_token_ids):
+                    continue
 
                 if trunc_idx <= 0:
                     continue
-                if trunc_idx >= len(source_token_ids) or trunc_idx >= len(base_token_ids):
+                if trunc_idx >= len(source_token_ids):
                     continue
 
                 experiments.append(
@@ -289,21 +220,21 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
                         "experiment_id": f"pair{pair_id}_v{v_idx}",
                         "pair_id": pair_id,
                         "value_index": v_idx,
-                        "experiment_type": "value_match",
+                        "experiment_type": "noise_value_match",
                         "truncation_token_index": trunc_idx,
                         "source": {
                             "token_ids": source_token_ids,
                             "score_token_id": int(source_token_ids[trunc_idx]),
                         },
                         "target": {
-                            "token_ids": base_token_ids,
-                            "score_token_id": int(base_token_ids[trunc_idx]),
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
                         },
                     }
                 )
         else:
-            # Fallback: if no CoT values found, use tail position
-            usable_len = min(len(source_token_ids), len(base_token_ids))
+            # Fallback: if no CoT values found, use tail position.
+            usable_len = len(source_token_ids)
             if usable_len > 1:
                 trunc_idx = usable_len - 1
                 experiments.append(
@@ -311,15 +242,110 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
                         "experiment_id": f"pair{pair_id}_tail",
                         "pair_id": pair_id,
                         "value_index": -1,
-                        "experiment_type": "tail_fallback",
+                        "experiment_type": "noise_tail_fallback",
                         "truncation_token_index": trunc_idx,
                         "source": {
                             "token_ids": source_token_ids,
                             "score_token_id": int(source_token_ids[trunc_idx]),
                         },
                         "target": {
-                            "token_ids": base_token_ids,
-                            "score_token_id": int(base_token_ids[trunc_idx]),
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
+                        },
+                    }
+                )
+
+    return experiments
+
+
+def build_experiments_from_traces(payload: Dict) -> List[Dict]:
+    traces = payload.get("traces")
+    if not isinstance(traces, list):
+        return []
+
+    experiments: List[Dict] = []
+    for pidx, trace in enumerate(traces):
+        if not isinstance(trace, dict):
+            continue
+
+        pair_id = trace.get("id", pidx)
+        source_token_ids = trace.get("tokens") if isinstance(trace.get("tokens"), list) else []
+        source_text = trace.get("generated_text", "")
+        if not source_token_ids:
+            continue
+
+        cot_marker = "Answer (step-by-step)"
+        cot_start_pos = source_text.find(cot_marker)
+        if cot_start_pos == -1:
+            continue
+        cot_start_pos += len(cot_marker)
+
+        trace_values = trace.get("values", [])
+        cot_values = []
+        if isinstance(trace_values, list):
+            for value_obj in trace_values:
+                if not isinstance(value_obj, dict):
+                    continue
+                span_start = value_obj.get("span_start")
+                if isinstance(span_start, int) and span_start >= cot_start_pos:
+                    cot_values.append(value_obj)
+
+        def _value_span_start(value_obj: Dict) -> int:
+            val = value_obj.get("span_start")
+            return int(val) if isinstance(val, int) else 0
+
+        cot_values.sort(key=_value_span_start, reverse=True)
+
+        if cot_values:
+            for v_idx, value_obj in enumerate(cot_values):
+                src_tok_start = value_obj.get("token_start")
+                src_tok_end = value_obj.get("token_end")
+                if not isinstance(src_tok_start, int):
+                    continue
+
+                if isinstance(src_tok_end, int):
+                    trunc_idx = max(0, src_tok_start)
+                else:
+                    trunc_idx = max(0, src_tok_start)
+
+                if trunc_idx <= 0 or trunc_idx >= len(source_token_ids):
+                    continue
+
+                experiments.append(
+                    {
+                        "experiment_id": f"trace{pair_id}_v{v_idx}",
+                        "pair_id": pair_id,
+                        "value_index": v_idx,
+                        "experiment_type": "noise_value_match",
+                        "truncation_token_index": trunc_idx,
+                        "source": {
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
+                        },
+                        "target": {
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
+                        },
+                    }
+                )
+        else:
+            usable_len = len(source_token_ids)
+            if usable_len > 1:
+                trunc_idx = usable_len - 1
+                experiments.append(
+                    {
+                        "experiment_id": f"trace{pair_id}_tail",
+                        "pair_id": pair_id,
+                        "value_index": -1,
+                        "experiment_type": "noise_tail_fallback",
+                        "truncation_token_index": trunc_idx,
+                        "source": {
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
+                        },
+                        "target": {
+                            "token_ids": source_token_ids,
+                            "score_token_id": int(source_token_ids[trunc_idx]),
                         },
                     }
                 )
@@ -334,10 +360,19 @@ def load_experiments_from_input(path: Path) -> List[Dict]:
     if isinstance(payload, dict) and isinstance(payload.get("experiments"), list):
         return payload["experiments"]
 
+    if isinstance(payload, dict) and isinstance(payload.get("traces"), list):
+        return build_experiments_from_traces(payload)
+
     if isinstance(payload, dict) and isinstance(payload.get("pairs"), list):
         return build_experiments_from_pairs(payload)
 
-    raise ValueError("Input JSON must contain top-level 'experiments' or 'pairs'")
+    raise ValueError("Input JSON must contain top-level 'experiments', 'traces', or 'pairs'")
+
+
+def stable_int_seed(*parts: object) -> int:
+    joined = "|".join(str(part) for part in parts)
+    digest = hashlib.sha256(joined.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=False)
 
 def load_model_and_tokenizer():
     """Load model and tokenizer."""
@@ -399,7 +434,7 @@ def score_logprob_at_position(logits: torch.Tensor, position: int, token_id: int
 
 
 def capture_source_activations(model, layers, source_token_ids: List[int], layer_indices: List[int]) -> Dict[int, torch.Tensor]:
-    """Capture full hidden states for SOURCE at chosen layers."""
+    """Capture full hidden states for the clean trace at chosen layers."""
     source_acts: Dict[int, torch.Tensor] = {}
 
     def make_capture_hook(layer_idx: int):
@@ -420,18 +455,37 @@ def capture_source_activations(model, layers, source_token_ids: List[int], layer
     return source_acts
 
 
+def make_noise_cell(reference_cell: torch.Tensor, experiment_id: str, layer_idx: int, token_pos: int) -> torch.Tensor:
+    """Generate a single replacement cell for one layer/token position."""
+    if NOISE_MODE == "zero":
+        return torch.zeros_like(reference_cell)
+
+    cell = reference_cell.float()
+    cell_std = float(cell.std(unbiased=False).item())
+    if not np.isfinite(cell_std) or cell_std <= 0:
+        cell_std = 1.0
+
+    seed = stable_int_seed(NOISE_SEED, experiment_id, layer_idx, token_pos)
+    generator = torch.Generator(device=reference_cell.device)
+    generator.manual_seed(seed)
+    noise = torch.randn(reference_cell.shape, device=reference_cell.device, dtype=reference_cell.dtype, generator=generator)
+    return noise * (cell_std * float(NOISE_SCALE))
+
+
 def patched_logits_batch_for_layer(
     model,
     layers,
     target_token_ids: List[int],
     source_acts: Dict[int, torch.Tensor],
     layer_idx: int,
+    experiment_id: str,
     token_positions: List[int],
+    sample_idx: int = 0,
 ) -> torch.Tensor:
-    """Forward TARGET for many patch cells on one layer.
+    """Forward the clean trace with many noisy patch cells on one layer.
 
-    Each batch item corresponds to one token position, and only that single cell
-    is patched in that item.
+    Each batch item corresponds to one token position and receives noise at
+    only that single cell.
     """
 
     def _patch_hook(_module, _inputs, output):
@@ -444,7 +498,8 @@ def patched_logits_batch_for_layer(
 
         for batch_idx, token_pos in enumerate(token_positions):
             if token_pos < patched.shape[1] and token_pos < src_hidden.shape[1]:
-                patched[batch_idx, token_pos, :] = src_hidden[0, token_pos, :]
+                reference_cell = src_hidden[:, token_pos, :]
+                patched[batch_idx, token_pos, :] = make_noise_cell(reference_cell, f"{experiment_id}|sample{sample_idx}", layer_idx, token_pos)
         if isinstance(output, tuple):
             return (patched,) + output[1:]
         return patched
@@ -512,6 +567,13 @@ def plot_single_heatmap(
     plt.close()
 
 
+def build_heatmap_title(exp_id: str, pair_id: int, exp_type: str, trunc_idx: int, scored_token_index: int) -> str:
+    return (
+        f"{exp_id} | pair {pair_id} | type {exp_type} | trunc {trunc_idx}\n"
+        f"NOISE delta: log P(true token@{scored_token_index})"
+    )
+
+
 def main():
     global INPUT_JSON
     global OUTPUT_ROOT_DIR
@@ -520,13 +582,16 @@ def main():
     global EXPERIMENT_IDS
     global LAYERS_TO_PATCH
     global TOKEN_POSITIONS_TO_PATCH
-    global PATCH_BATCH_SIZE
     global MODEL_PATH
     global TOKENIZER_PATH
     global DEVICE
     global DTYPE
     global SAVE_PLOTS
-    global RESUME
+    global NOISE_MODE
+    global NOISE_SCALE
+    global NOISE_SEED
+    global NOISE_SAMPLES_PER_CELL
+    global PATCH_BATCH_SIZE
 
     args = build_arg_parser().parse_args()
     INPUT_JSON = args.input_json
@@ -537,14 +602,17 @@ def main():
     EXPERIMENT_IDS = parse_str_list(args.experiment_ids)
     LAYERS_TO_PATCH = parse_int_list(args.layers_to_patch)
     TOKEN_POSITIONS_TO_PATCH = parse_int_list(args.token_positions_to_patch)
-    PATCH_BATCH_SIZE = args.patch_batch_size
 
     MODEL_PATH = args.model_path
     TOKENIZER_PATH = args.tokenizer_path
     DEVICE = args.device
     DTYPE = torch.float16 if args.dtype == "float16" else torch.float32
     SAVE_PLOTS = not args.no_plots
-    RESUME = not args.no_resume
+    NOISE_MODE = args.noise_mode
+    NOISE_SCALE = args.noise_scale
+    NOISE_SEED = args.noise_seed
+    NOISE_SAMPLES_PER_CELL = args.noise_samples_per_cell
+    PATCH_BATCH_SIZE = args.patch_batch_size
 
     print("\n" + "=" * 100)
     print("ACTIVATION PATCHING ENGINE")
@@ -557,10 +625,11 @@ def main():
     print(f"  Experiment IDs filter: {EXPERIMENT_IDS if EXPERIMENT_IDS else 'none'}")
     print(f"  Layers to patch: {LAYERS_TO_PATCH if LAYERS_TO_PATCH else 'all'}")
     print(f"  Token positions to patch: {TOKEN_POSITIONS_TO_PATCH if TOKEN_POSITIONS_TO_PATCH else 'all'}")
+    print(f"  Noise mode: {NOISE_MODE} | scale: {NOISE_SCALE} | seed: {NOISE_SEED}")
+    print(f"  Noise samples/cell: {NOISE_SAMPLES_PER_CELL}")
     print(f"  Patch batch size: {PATCH_BATCH_SIZE}")
     print(f"  Device: {DEVICE}, Dtype: {DTYPE}")
     print(f"  Save plots: {SAVE_PLOTS}")
-    print(f"  Resume: {RESUME}")
 
     model, tokenizer = load_model_and_tokenizer()
     _ = tokenizer
@@ -578,10 +647,33 @@ def main():
         }
         exp_indices = []
         for exp_id in EXPERIMENT_IDS:
-            if exp_id not in id_to_index:
-                print(f"  Warning: experiment_id '{exp_id}' not found. Skipping.")
+            if exp_id in id_to_index:
+                exp_indices.append(id_to_index[exp_id])
                 continue
-            exp_indices.append(id_to_index[exp_id])
+
+            matched = False
+            try:
+                numeric_id = int(exp_id)
+            except ValueError:
+                numeric_id = None
+
+            if numeric_id is not None:
+                if 0 <= numeric_id < len(experiments):
+                    exp_indices.append(numeric_id)
+                    matched = True
+                pair_matches = [
+                    i for i, ex in enumerate(experiments)
+                    if ex.get("pair_id") == numeric_id
+                ]
+                if pair_matches:
+                    exp_indices.extend(pair_matches)
+                    matched = True
+
+            if not matched:
+                print(f"  Warning: experiment selector '{exp_id}' not found. Skipping.")
+
+        # Preserve insertion order while removing duplicates.
+        exp_indices = list(dict.fromkeys(exp_indices))
     elif EXPERIMENT_INDICES is None:
         exp_indices = list(range(len(experiments)))
     else:
@@ -593,23 +685,6 @@ def main():
     pair_merged_payloads = {}
     OUTPUT_ROOT_DIR.mkdir(parents=True, exist_ok=True)
 
-    existing_run_records: List[Dict] = []
-    completed_experiment_ids = set()
-    if RESUME:
-        pair_merged_payloads = load_existing_pair_payloads(OUTPUT_ROOT_DIR)
-        completed_experiment_ids = collect_completed_experiment_ids(pair_merged_payloads)
-
-        if OUTPUT_SUMMARY_JSON.exists():
-            try:
-                with open(OUTPUT_SUMMARY_JSON, "r") as f:
-                    prior_summary = json.load(f)
-                if isinstance(prior_summary, dict) and isinstance(prior_summary.get("runs"), list):
-                    existing_run_records = prior_summary["runs"]
-            except Exception as e:
-                print(f"  Warning: failed to load existing summary {OUTPUT_SUMMARY_JSON}: {e}")
-
-        print(f"Resume state: {len(completed_experiment_ids)} experiments already completed")
-
     for exp_idx in exp_indices:
         if exp_idx >= len(experiments):
             print(f"  Warning: experiment index {exp_idx} out of range. Skipping.")
@@ -617,11 +692,6 @@ def main():
 
         exp = experiments[exp_idx]
         exp_id = exp.get("experiment_id", f"idx_{exp_idx}")
-
-        if RESUME and exp_id in completed_experiment_ids:
-            print(f"\n  [{exp_idx}] {exp_id} | already completed, skipping")
-            continue
-
         pair_id = exp["pair_id"]
         value_index = exp.get("value_index", -1)
         exp_type = exp["experiment_type"]
@@ -630,9 +700,9 @@ def main():
         print(f"\n  [{exp_idx}] {exp_id} | Pair {pair_id}, Type {exp_type}, Truncation {trunc_idx}")
 
         source_token_ids = exp["source"]["token_ids"]
-        base_token_ids = exp["target"]["token_ids"]
+        base_token_ids = source_token_ids
 
-        usable_len = min(len(source_token_ids), len(base_token_ids))
+        usable_len = len(source_token_ids)
         if usable_len < 1:
             print("    Warning: usable token length < 1, skipping.")
             continue
@@ -656,8 +726,7 @@ def main():
             print(f"    Warning: no valid token positions to patch (truncation at {trunc_idx}), skipping.")
             continue
         source_score_token_id = exp["source"].get("score_token_id")
-        base_score_token_id = exp["target"].get("score_token_id")
-        if source_score_token_id is None or base_score_token_id is None:
+        if source_score_token_id is None:
             print("    Warning: missing score_token_id in experiment data. Ensure INPUT_JSON includes score targets or aligned pairs with matched token spans. Skipping.")
             continue
 
@@ -667,10 +736,9 @@ def main():
         print("    Phase 1: capture SOURCE activations (all selected layers)")
         source_acts = capture_source_activations(model, layers, source_token_ids, layer_indices)
 
-        print("    Phase 2: baseline TARGET forward and next-SOURCE-token logprobs")
+        print("    Phase 2: baseline clean forward and true-next-token logprob")
         baseline_logits = forward_logits(model, base_token_ids)
-        baseline_source_scores = compute_next_token_logprobs(baseline_logits, source_token_ids, usable_len)
-        baseline_base_scores = compute_next_token_logprobs(baseline_logits, base_token_ids, usable_len)
+        baseline_true_scores = compute_next_token_logprobs(baseline_logits, source_token_ids, usable_len)
         # Truncation index n is exclusive context [0..n-1]; score token index n
         # from logits at position n-1.
         if not isinstance(trunc_idx, int) or trunc_idx <= 0 or trunc_idx >= usable_len:
@@ -678,31 +746,38 @@ def main():
             continue
         score_pos = trunc_idx - 1
         scored_token_index = trunc_idx
-        baseline_source_score = score_logprob_at_position(baseline_logits, score_pos, int(source_score_token_id))
-        baseline_base_score = score_logprob_at_position(baseline_logits, score_pos, int(base_score_token_id))
+        baseline_true_score = score_logprob_at_position(baseline_logits, score_pos, int(source_score_token_id))
 
-        source_delta_matrix = np.full((len(layer_indices), len(pos_indices)), np.nan, dtype=np.float32)
-        base_delta_matrix = np.full((len(layer_indices), len(pos_indices)), np.nan, dtype=np.float32)
+        noise_delta_matrix = np.full((len(layer_indices), len(pos_indices)), np.nan, dtype=np.float32)
+        noise_delta_std_matrix = np.full((len(layer_indices), len(pos_indices)), np.nan, dtype=np.float32)
 
-        print("    Phase 3: batched single-cell patching over (layer, position)")
+        print("    Phase 3: batched multi-sample noisy patching over (layer, position)")
         for li, layer_idx in enumerate(layer_indices):
             for batch_start in range(0, len(pos_indices), PATCH_BATCH_SIZE):
                 batch_positions = pos_indices[batch_start : batch_start + PATCH_BATCH_SIZE]
-                patched_logits = patched_logits_batch_for_layer(
-                    model=model,
-                    layers=layers,
-                    target_token_ids=base_token_ids,
-                    source_acts=source_acts,
-                    layer_idx=layer_idx,
-                    token_positions=batch_positions,
-                )
+
+                trial_deltas_by_pos = {pos: [] for pos in batch_positions}
+                for sample_idx in range(NOISE_SAMPLES_PER_CELL):
+                    patched_logits = patched_logits_batch_for_layer(
+                        model=model,
+                        layers=layers,
+                        target_token_ids=base_token_ids,
+                        source_acts=source_acts,
+                        layer_idx=layer_idx,
+                        experiment_id=exp_id,
+                        token_positions=batch_positions,
+                        sample_idx=sample_idx,
+                    )
+
+                    for batch_offset, pos in enumerate(batch_positions):
+                        patched_true_score = score_logprob_at_position(patched_logits[batch_offset], score_pos, int(source_score_token_id))
+                        trial_deltas_by_pos[pos].append(patched_true_score - baseline_true_score)
 
                 for batch_offset, pos in enumerate(batch_positions):
                     pi = batch_start + batch_offset
-                    patched_source_score = score_logprob_at_position(patched_logits[batch_offset], score_pos, int(source_score_token_id))
-                    patched_base_score = score_logprob_at_position(patched_logits[batch_offset], score_pos, int(base_score_token_id))
-                    source_delta_matrix[li, pi] = patched_source_score - baseline_source_score
-                    base_delta_matrix[li, pi] = patched_base_score - baseline_base_score
+                    trial_array = np.asarray(trial_deltas_by_pos[pos], dtype=np.float32)
+                    noise_delta_matrix[li, pi] = float(np.mean(trial_array))
+                    noise_delta_std_matrix[li, pi] = float(np.std(trial_array, ddof=0))
 
         # All outputs for a pair go into a single pair{id} directory
         exp_dir = OUTPUT_ROOT_DIR / f"pair{pair_id}"
@@ -710,68 +785,26 @@ def main():
 
         # Include value_index in filenames to distinguish different numeric values within the pair
         value_suffix = f"_v{value_index}" if value_index >= 0 else "_tail"
-        source_heatmap_png = exp_dir / f"source_heatmap{value_suffix}_t{trunc_idx}.png"
-        base_heatmap_png = exp_dir / f"base_heatmap{value_suffix}_t{trunc_idx}.png"
-        diff_heatmap_png = exp_dir / f"diff_heatmap{value_suffix}_t{trunc_idx}.png"
+        noise_heatmap_png = exp_dir / f"noise_heatmap{value_suffix}_t{trunc_idx}.png"
         pair_json = exp_dir / "pair_matrices.json"
         x_tick_labels = build_x_tick_labels(tokenizer, source_token_ids, pos_indices)
-        diff_delta_matrix = source_delta_matrix - base_delta_matrix
 
-        all_abs = np.concatenate(
-            [
-                np.abs(source_delta_matrix[np.isfinite(source_delta_matrix)]),
-                np.abs(base_delta_matrix[np.isfinite(base_delta_matrix)]),
-                np.abs(diff_delta_matrix[np.isfinite(diff_delta_matrix)]),
-            ]
-        )
-        shared_vmax = float(all_abs.max()) if all_abs.size > 0 else 1.0
-        if shared_vmax <= 0:
-            shared_vmax = 1.0
-        diff_abs = np.abs(diff_delta_matrix[np.isfinite(diff_delta_matrix)])
-        diff_vmax = float(diff_abs.max()) if diff_abs.size > 0 else 1.0
-        if diff_vmax <= 0:
-            diff_vmax = 1.0
+        finite_vals = noise_delta_matrix[np.isfinite(noise_delta_matrix)]
+        noise_vmax = float(np.abs(finite_vals).max()) if finite_vals.size > 0 else 1.0
+        if noise_vmax <= 0:
+            noise_vmax = 1.0
 
-        source_title = (
-            f"{exp_id} | pair {pair_id} | type {exp_type} | trunc {trunc_idx}\n"
-            f"SOURCE delta: log P(source token@{scored_token_index})"
-        )
-        base_title = (
-            f"{exp_id} | pair {pair_id} | type {exp_type} | trunc {trunc_idx}\n"
-            f"BASE delta: log P(base token@{scored_token_index})"
-        )
-        diff_title = (
-            f"{exp_id} | pair {pair_id} | type {exp_type} | trunc {trunc_idx}\n"
-            f"DIFF delta: source - base at token@{scored_token_index}"
-        )
+        noise_title = build_heatmap_title(exp_id, pair_id, exp_type, trunc_idx, scored_token_index)
 
         if SAVE_PLOTS:
             plot_single_heatmap(
-                matrix=source_delta_matrix,
-                title=source_title,
-                out_png=source_heatmap_png,
+                matrix=noise_delta_matrix,
+                title=noise_title,
+                out_png=noise_heatmap_png,
                 x_labels=x_tick_labels,
                 layer_indices=layer_indices,
-                cbar_label="Delta log P(source token)",
-                vmax=shared_vmax,
-            )
-            plot_single_heatmap(
-                matrix=base_delta_matrix,
-                title=base_title,
-                out_png=base_heatmap_png,
-                x_labels=x_tick_labels,
-                layer_indices=layer_indices,
-                cbar_label="Delta log P(base token)",
-                vmax=shared_vmax,
-            )
-            plot_single_heatmap(
-                matrix=diff_delta_matrix,
-                title=diff_title,
-                out_png=diff_heatmap_png,
-                x_labels=x_tick_labels,
-                layer_indices=layer_indices,
-                cbar_label="Delta log P(source token) - Delta log P(base token)",
-                vmax=diff_vmax,
+                cbar_label="Delta log P(true next token)",
+                vmax=noise_vmax,
             )
 
         matrix_payload = {
@@ -787,17 +820,17 @@ def main():
             "score_position_used": score_pos,
             "scored_token_index": scored_token_index,
             "scored_source_token_id": int(source_score_token_id),
-            "scored_base_token_id": int(base_score_token_id),
             "scored_source_token_text": tokenizer.decode([int(source_score_token_id)]),
-            "scored_base_token_text": tokenizer.decode([int(base_score_token_id)]),
-            "baseline_scored_source_logprob": baseline_source_score,
-            "baseline_scored_base_logprob": baseline_base_score,
+            "noise_mode": NOISE_MODE,
+            "noise_scale": NOISE_SCALE,
+            "noise_seed": NOISE_SEED,
+            "noise_samples_per_cell": NOISE_SAMPLES_PER_CELL,
+            "patch_batch_size": PATCH_BATCH_SIZE,
+            "baseline_true_logprob": baseline_true_score,
             "x_tick_labels": x_tick_labels,
-            "baseline_next_source_logprobs": baseline_source_scores,
-            "baseline_next_base_logprobs": baseline_base_scores,
-            "source_delta_matrix": source_delta_matrix.tolist(),
-            "base_delta_matrix": base_delta_matrix.tolist(),
-            "diff_delta_matrix": diff_delta_matrix.tolist(),
+            "baseline_next_true_logprobs": baseline_true_scores,
+            "noise_delta_matrix": noise_delta_matrix.tolist(),
+            "noise_delta_std_matrix": noise_delta_std_matrix.tolist(),
         }
 
         pair_key = f"pair{pair_id}"
@@ -809,12 +842,7 @@ def main():
                 "pair_id": pair_id,
                 "entries": [],
             }
-        # Replace any existing entry with the same experiment_id (if present).
-        old_entries = pair_merged_payloads[pair_key].get("entries", [])
-        new_entries = [e for e in old_entries if e.get("experiment_id") != exp_id]
-        new_entries.append(matrix_payload)
-        pair_merged_payloads[pair_key]["entries"] = new_entries
-        completed_experiment_ids.add(exp_id)
+        pair_merged_payloads[pair_key]["entries"].append(matrix_payload)
 
         # Flush per-pair JSON incrementally so partial/interrupted runs still
         # leave usable pair-level data artifacts on disk.
@@ -832,9 +860,7 @@ def main():
                 "value_index": value_index,
                 "experiment_type": exp_type,
                 "truncation_token_index": trunc_idx,
-                "source_heatmap_png": str(source_heatmap_png) if SAVE_PLOTS else None,
-                "base_heatmap_png": str(base_heatmap_png) if SAVE_PLOTS else None,
-                "diff_heatmap_png": str(diff_heatmap_png) if SAVE_PLOTS else None,
+                "noise_heatmap_png": str(noise_heatmap_png) if SAVE_PLOTS else None,
                 "pair_json": str(pair_json),
                 "usable_len": usable_len,
                 "n_layers": len(layer_indices),
@@ -842,9 +868,7 @@ def main():
             }
         )
         if SAVE_PLOTS:
-            print(f"    Saved: {source_heatmap_png}")
-            print(f"    Saved: {base_heatmap_png}")
-            print(f"    Saved: {diff_heatmap_png}")
+            print(f"    Saved: {noise_heatmap_png}")
 
     for pair_key, payload in pair_merged_payloads.items():
         pair_dir = OUTPUT_ROOT_DIR / pair_key
@@ -859,31 +883,31 @@ def main():
     print(f"\n" + "=" * 100)
     print(f"Writing summary to {OUTPUT_SUMMARY_JSON}...")
 
-    merged_runs = merge_run_records(existing_run_records, run_records) if RESUME else run_records
-
     output = {
         "schema_version": "v1",
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "model": "Qwen2.5-32B",
-        "total_runs": len(merged_runs),
-        "runs_completed_this_invocation": len(run_records),
+        "total_runs": len(run_records),
         "configuration": {
             "experiment_ids_filter": EXPERIMENT_IDS,
             "experiment_indices_filter": EXPERIMENT_INDICES,
             "layers_to_patch": LAYERS_TO_PATCH if LAYERS_TO_PATCH else "all",
             "positions_to_patch": TOKEN_POSITIONS_TO_PATCH if TOKEN_POSITIONS_TO_PATCH else "all",
             "score_target_definition": "token at truncation index n (predicted from position n-1)",
-            "resume": RESUME,
+            "noise_mode": NOISE_MODE,
+            "noise_scale": NOISE_SCALE,
+            "noise_seed": NOISE_SEED,
+            "noise_samples_per_cell": NOISE_SAMPLES_PER_CELL,
             "patch_batch_size": PATCH_BATCH_SIZE,
         },
-        "runs": merged_runs,
+        "runs": run_records,
     }
 
     OUTPUT_SUMMARY_JSON.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_SUMMARY_JSON, "w") as f:
         json.dump(output, f, indent=2)
 
-    print(f"Wrote {len(merged_runs)} total run records ({len(run_records)} newly completed)")
+    print(f"Wrote {len(run_records)} run records")
     print(f"✓ Summary: {OUTPUT_SUMMARY_JSON}")
     print("=" * 100 + "\n")
 
