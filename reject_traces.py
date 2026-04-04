@@ -217,6 +217,38 @@ def extract_final_answer_value(text: Optional[str]) -> Optional[float]:
     return None
 
 
+def extract_last_number_value(text: Optional[str]) -> Optional[float]:
+    """Fallback extractor that uses the last numeric mention in the text."""
+    if not text:
+        return None
+
+    matches = list(NUMBER_PATTERN.finditer(text))
+    if not matches:
+        return None
+
+    candidate = matches[-1].group(0)
+    normalized = normalize_number_string(candidate)
+    return float(normalized) if normalized is not None else None
+
+
+def extract_answer_value(text: Optional[str], fallback_to_last_number: bool = True) -> Tuple[Optional[float], str]:
+    """Extract the most likely final answer from a completion.
+
+    Prefer explicit final-answer phrasing, but fall back to the last numeric
+    mention when the model gives a correct answer without the expected cue.
+    """
+    extracted = extract_final_answer_value(text)
+    if extracted is not None:
+        return extracted, "final_answer_pattern"
+
+    if fallback_to_last_number:
+        extracted = extract_last_number_value(text)
+        if extracted is not None:
+            return extracted, "last_number_fallback"
+
+    return None, "missing_final_answer"
+
+
 def compute_relative_error(observed: float, expected: float) -> float:
     denominator = max(abs(expected), 1e-12)
     return abs(observed - expected) / denominator
@@ -268,6 +300,19 @@ def main() -> None:
     parser.add_argument("--output-json", type=Path, default=None, help="Output path for reject traces JSON.")
     parser.add_argument("--tokenizer-path", type=Path, default=None, help="Tokenizer path for tokenizing accepted traces.")
     parser.add_argument("--max-relative-error", type=float, default=0.05, help="Maximum allowed relative error for acceptance.")
+    parser.set_defaults(fallback_to_last_number=True)
+    parser.add_argument(
+        "--fallback-to-last-number",
+        dest="fallback_to_last_number",
+        action="store_true",
+        help="Fallback to using the last numeric mention when explicit final-answer phrasing is missing (default: on).",
+    )
+    parser.add_argument(
+        "--no-fallback-to-last-number",
+        dest="fallback_to_last_number",
+        action="store_false",
+        help="Require explicit final-answer phrasing and disable the numeric fallback.",
+    )
 
     args = parser.parse_args()
 
@@ -304,7 +349,10 @@ def main() -> None:
         corrected_text = corrected_text or ""
 
         expected_answer_key, expected_answer_value = extract_expected_answer_from_metadata(prompt_metadata)
-        extracted_answer = extract_final_answer_value(corrected_text)
+        extracted_answer, extraction_method = extract_answer_value(
+            corrected_text,
+            fallback_to_last_number=args.fallback_to_last_number,
+        )
 
         accepted = False
         relative_error = None
@@ -340,6 +388,7 @@ def main() -> None:
             "expected_answer_key": expected_answer_key,
             "expected_answer_value": expected_answer_value,
             "extracted_answer": extracted_answer,
+            "extraction_method": extraction_method,
             "relative_error": relative_error,
             "max_relative_error": args.max_relative_error,
             "truncation_applied": truncation_applied,

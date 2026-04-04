@@ -17,7 +17,31 @@ Each dictionary contains:
     - expected_<answer>: The final answer to the question
 """
 
+import re
+
 import numpy as np
+
+
+NUMBER_LITERAL_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?(?![\w.])")
+
+
+def format_prompt_number(value):
+    """Format prompt numbers with two decimals, occasionally using scientific notation."""
+    try:
+        numeric = float(value)
+    except Exception:
+        return str(value)
+
+    magnitude = abs(numeric)
+    use_scientific = magnitude != 0 and (magnitude >= 1000 or magnitude < 0.01) and np.random.random() < 0.35
+    if use_scientific:
+        return f"{numeric:.2e}"
+    return f"{numeric:.2f}"
+
+
+def normalize_prompt_numbers(prompt_text):
+    """Rewrite numeric literals in a prompt to a consistent display format."""
+    return NUMBER_LITERAL_PATTERN.sub(lambda match: format_prompt_number(match.group(0)), prompt_text)
 
 
 # ==========================================
@@ -1446,7 +1470,6 @@ def gen_implicit_acceleration_from_velocity_change(samples_per_prompt):
             obj = np.random.choice(objects)
 
             a = (v - u) / t
-            expected_force = m * a
 
             prompt = "Question: " + prompt_format.format(obj=obj, u=u, v=v, t=t, m=m) + " Answer (step-by-step): "
 
@@ -1459,7 +1482,7 @@ def gen_implicit_acceleration_from_velocity_change(samples_per_prompt):
                 't': t,
                 'm': m,
                 'a': a,
-                'expected_force': expected_force,
+                'expected_acceleration': a,
             })
 
     return prompts_data
@@ -1654,4 +1677,9 @@ def generate_prompts_for_experiment(experiment_name, samples_per_format=50):
         raise ValueError(f"Unknown experiment: {experiment_name}. Available: {list(generators.keys())}")
     
     generator_func = generators[experiment_name]
-    return generator_func(samples_per_format)
+    prompts_data = generator_func(samples_per_format)
+
+    for prompt_dict in prompts_data:
+        prompt_dict["prompt"] = normalize_prompt_numbers(prompt_dict["prompt"])
+
+    return prompts_data

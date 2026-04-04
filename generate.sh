@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=generate_traces
-#SBATCH --time=0-0:30:00 # D-HH:MM
+#SBATCH --time=0-0:15:00 # D-HH:MM
 #SBATCH --account=def-rgrosse
 #SBATCH --mem=128G
 #SBATCH --gpus-per-node=h100:1

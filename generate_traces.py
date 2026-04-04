@@ -156,7 +156,7 @@ def generate_trace(prompt_text, model, tokenizer, max_new_tokens=256):
     generated_ids = outputs.sequences[0]
     token_ids = generated_ids.cpu().tolist()
     token_strings = [tokenizer.decode([tid]) for tid in token_ids]
-    generated_text = tokenizer.decode(generated_ids, skip_special_tokens=False)
+    generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
     
     print(f" [Generated {len(token_ids) - prompt_length} tokens]")
     
@@ -188,7 +188,7 @@ def generate_trace_batch(prompt_texts, model, tokenizer, max_new_tokens=256):
     for idx, generated_ids in enumerate(outputs.sequences):
         token_ids = generated_ids.cpu().tolist()
         token_strings = [tokenizer.decode([tid]) for tid in token_ids]
-        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=False)
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
         batch_traces.append(
             {
                 'tokens': token_ids,
