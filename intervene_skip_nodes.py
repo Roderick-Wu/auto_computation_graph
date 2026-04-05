@@ -433,16 +433,12 @@ def resolve_default_model_path(model_name: str) -> Path:
 
 
 def resolve_default_graph_dir(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "links" / "scratch"
-    if not scratch_root.exists():
-        scratch_root = Path.home() / "scratch"
+    scratch_root = Path.home() / "scratch"
     return scratch_root / "traces" / model_name / experiment / "patch_runs"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "links" / "scratch"
-    if not scratch_root.exists():
-        scratch_root = Path.home() / "scratch"
+    scratch_root = Path.home() / "scratch"
     return scratch_root / "traces" / model_name / experiment / "node_skipping_results.json"
 
 

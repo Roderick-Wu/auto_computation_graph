@@ -18,10 +18,7 @@ fi
 experiment="$1"
 model_name="${2:-Qwen2.5-32B}"
 
-scratch_root="$HOME/links/scratch"
-if [ ! -d "$scratch_root" ]; then
-    scratch_root="$HOME/scratch"
-fi
+scratch_root="$HOME/scratch"
 
 traces_dir="$scratch_root/traces/$model_name/$experiment"
 input_json="$traces_dir/reject_traces.json"

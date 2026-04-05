@@ -17,7 +17,7 @@ EXPERIMENT=${1:-velocity}
 MODEL_NAME=${2:-Qwen2.5-32B}
 
 # Input/output paths
-TRACES_DIR="/home/wuroderi/links/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
+TRACES_DIR="/home/wuroderi/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
 PATCH_RUNS_DIR="${TRACES_DIR}/patch_runs"
 OUTPUT_DIR="${TRACES_DIR}/graphs"
 

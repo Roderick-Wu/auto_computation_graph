@@ -23,16 +23,12 @@ NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)
 
 
 def resolve_default_input_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "links" / "scratch"
-    if not scratch_root.exists():
-        scratch_root = Path.home() / "scratch"
+    scratch_root = Path.home() / "scratch"
     return scratch_root / "traces" / model_name / experiment / "paired_traces.json"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "links" / "scratch"
-    if not scratch_root.exists():
-        scratch_root = Path.home() / "scratch"
+    scratch_root = Path.home() / "scratch"
     return scratch_root / "traces" / model_name / experiment / "aligned_pairs.json"
 
 

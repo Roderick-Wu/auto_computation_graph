@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=patch_graph
-#SBATCH --time=0-8:00:00 # D-HH:MM
-#SBATCH --account=def-zhijing
+#SBATCH --time=0-16:00:00 # D-HH:MM
+#SBATCH --account=def-rgrosse
 #SBATCH --mem=64G
 #SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=1
@@ -23,7 +23,7 @@ EXPERIMENT=${1:-velocity}
 MODEL_NAME=${2:-Qwen2.5-32B}
 
 # Input/output paths
-TRACES_DIR="/home/wuroderi/links/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
+TRACES_DIR="/home/wuroderi/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
 INPUT_JSON="${TRACES_DIR}/aligned_pairs.json"
 OUTPUT_ROOT_DIR="${TRACES_DIR}/patch_runs"
 #OUTPUT_ROOT_DIR="${TRACES_DIR}/patch_runs_nopair"

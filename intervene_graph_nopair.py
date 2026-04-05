@@ -37,10 +37,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 #  - legacy truncated experiments payload with top-level "experiments"
 #  - reject traces payload with top-level "traces"
 #  - aligned pairs payload with top-level "pairs"
-INPUT_JSON = Path("/home/wuroderi/links/scratch/traces/Qwen2.5-32B/velocity/aligned_pairs.json")
+INPUT_JSON = Path("/home/wuroderi/scratch/traces/Qwen2.5-32B/velocity/aligned_pairs.json")
 
 # Output directory (contains per-experiment folders)
-OUTPUT_ROOT_DIR = Path("/home/wuroderi/links/scratch/traces/Qwen2.5-32B/velocity/patch_solo")
+OUTPUT_ROOT_DIR = Path("/home/wuroderi/scratch/traces/Qwen2.5-32B/velocity/patch_solo")
 
 # Summary JSON across all runs
 OUTPUT_SUMMARY_JSON = OUTPUT_ROOT_DIR / "patching_summary.json"

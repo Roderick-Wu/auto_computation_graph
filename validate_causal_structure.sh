@@ -12,8 +12,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT/auto_computation_graph"
 
 if [[ -z "$GRAPH_DIR" ]]; then
-    SCRATCH_ROOT="$HOME/links/scratch"
-    [[ ! -d "$SCRATCH_ROOT" ]] && SCRATCH_ROOT="$HOME/scratch"
+    SCRATCH_ROOT="$HOME/scratch"
     GRAPH_DIR="$SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT/patch_runs"
 fi
 

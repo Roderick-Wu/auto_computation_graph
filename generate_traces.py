@@ -5,8 +5,7 @@ This script generates chain-of-thought responses for physics problems and saves:
 1. Token sequences (token IDs and decoded token strings)
 2. Prompt metadata (variables, hidden variables, expected answers)
 
-The traces are saved to ~/links/scratch/traces/<model_name>/ when
-available, otherwise ~/scratch/traces/<model_name>/.
+The traces are saved to ~/scratch/traces/<model_name>/.
 
 Usage:
     python generate_traces.py --experiment velocity --n_prompts 250
@@ -51,9 +50,7 @@ torch.manual_seed(args.seed)
 
 # Output directory
 model_name = Path(args.model_path).name
-scratch_root = Path.home() / 'links' / 'scratch'
-if not scratch_root.exists():
-    scratch_root = Path.home() / 'scratch'
+scratch_root = Path.home() / 'scratch'
 
 OUTPUT_DIR = scratch_root / 'traces' / model_name / args.experiment
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)

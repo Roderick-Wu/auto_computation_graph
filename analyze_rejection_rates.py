@@ -67,9 +67,7 @@ def resolve_default_model_path(model_name: str) -> Path:
 
 def resolve_traces_dir(model_name: str, experiment: str) -> Path:
     """Resolve path to experiment traces directory."""
-    scratch_root = Path.home() / "links" / "scratch"
-    if not scratch_root.exists():
-        scratch_root = Path.home() / "scratch"
+    scratch_root = Path.home() / "scratch"
     return scratch_root / "traces" / model_name / experiment
 
 
@@ -239,9 +237,7 @@ def main():
     
     # Save report
     if args.output_json is None:
-        scratch_root = Path.home() / "links" / "scratch"
-        if not scratch_root.exists():
-            scratch_root = Path.home() / "scratch"
+        scratch_root = Path.home() / "scratch"
         args.output_json = scratch_root / "traces" / args.model_name / "rejection_analysis.json"
     
     args.output_json.parent.mkdir(parents=True, exist_ok=True)

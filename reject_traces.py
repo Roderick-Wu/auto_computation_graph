@@ -35,16 +35,12 @@ FINAL_ANSWER_PATTERN = re.compile(
 
 
 def resolve_default_input_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "links" / "scratch"
-    if not scratch_root.exists():
-        scratch_root = Path.home() / "scratch"
+    scratch_root = Path.home() / "scratch"
     return scratch_root / "traces" / model_name / experiment / "traces.json"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "links" / "scratch"
-    if not scratch_root.exists():
-        scratch_root = Path.home() / "scratch"
+    scratch_root = Path.home() / "scratch"
     return scratch_root / "traces" / model_name / experiment / "reject_traces.json"
 
 
