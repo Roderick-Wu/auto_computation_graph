@@ -38,6 +38,7 @@ FINAL_ANSWER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 QUESTION_MARKER_PATTERN = re.compile(r"(?:\[\s*question\s*\]|question\s*[:\]\-])", re.IGNORECASE)
+NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\w.])")
 
 
 @dataclass
@@ -96,6 +97,25 @@ def extract_final_answer_value(text: Optional[str]) -> Optional[float]:
         normalized = normalize_number_string(candidate)
         return float(normalized) if normalized is not None else None
     return None
+
+
+def extract_last_number_value(text: Optional[str]) -> Optional[float]:
+    """Fallback: use the last numeric mention when explicit final-answer phrasing is absent."""
+    if not text:
+        return None
+    matches = list(NUMBER_PATTERN.finditer(text))
+    if not matches:
+        return None
+    candidate = matches[-1].group(0)
+    normalized = normalize_number_string(candidate)
+    return float(normalized) if normalized is not None else None
+
+
+def extract_answer_value(text: Optional[str]) -> Optional[float]:
+    out = extract_final_answer_value(text)
+    if out is not None:
+        return out
+    return extract_last_number_value(text)
 
 
 def compute_relative_error(observed: float, expected: float) -> float:
@@ -301,24 +321,30 @@ def test_node_skipping_on_pair(
     trace_text = get_pair_trace_text(pair)
     expected_answer = get_pair_expected_answer(pair)
     
-    if not trace_text or expected_answer is None:
+    if not trace_text:
         return results
+
+    if expected_answer is None:
+        expected_answer = extract_answer_value(trace_text)
     
     # Get baseline answer
-    baseline_answer = extract_final_answer_value(trace_text)
+    baseline_answer = extract_answer_value(trace_text)
     if baseline_answer is None:
         return results
     
     node_stats = graph.get("node_stats", {})
     nodes = {n["id"]: n for n in graph.get("nodes", [])}
     
-    # Focus on final answer (v0) and intermediate values
+    # Focus on value nodes, prioritizing those with ancestors.
     reachable_nodes = [n for n in nodes.keys() if n.startswith("v")]
+    nodes_with_ancestors = [n for n in reachable_nodes if len(build_parent_chain(n, graph)) > 1]
+    fallback_nodes = [n for n in reachable_nodes if n not in nodes_with_ancestors]
+    candidate_nodes = nodes_with_ancestors + fallback_nodes
     
     # Batch up all skip tests to run in parallel
     pending_tests: List[Tuple[SkippingTest, str, str]] = []  # (test_obj, forced_prompt, target_node)
     
-    for target_node in reachable_nodes[:3]:  # Test a few key nodes
+    for target_node in candidate_nodes[:3]:  # Test a few key nodes
         if len(results) + len(pending_tests) >= max_tests:
             break
             
@@ -386,11 +412,11 @@ def test_node_skipping_on_pair(
         # Update results
         for i, (test, forced_prompt, target_node) in enumerate(batch):
             generated, gen_len = generations[i]
-            skipped_answer = extract_final_answer_value(generated)
+            skipped_answer = extract_answer_value(generated)
             
             # Check correctness
             answer_correct = False
-            if skipped_answer is not None:
+            if skipped_answer is not None and expected_answer is not None:
                 error = compute_relative_error(skipped_answer, expected_answer)
                 answer_correct = error < 0.05
             
@@ -434,7 +460,7 @@ def resolve_default_model_path(model_name: str) -> Path:
 
 def resolve_default_graph_dir(model_name: str, experiment: str) -> Path:
     scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment / "patch_runs"
+    return scratch_root / "traces" / model_name / experiment / "graphs"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
@@ -469,6 +495,7 @@ def main():
     dtype = torch.float16 if args.dtype == "float16" else torch.float32
     model = AutoModelForCausalLM.from_pretrained(str(model_path), torch_dtype=dtype, device_map=args.device)
     tokenizer = AutoTokenizer.from_pretrained(str(model_path))
+    tokenizer.padding_side = "left"
     
     print(f"Loading graphs from: {graph_dir}")
     
@@ -488,6 +515,8 @@ def main():
         
         graph = load_graph_json(graph_path)
         pair = aligned_pairs_dict.get(pair_name)
+        if pair is None and pair_name.startswith("pair"):
+            pair = aligned_pairs_dict.get(pair_name[4:])
         
         if not graph or not pair:
             continue

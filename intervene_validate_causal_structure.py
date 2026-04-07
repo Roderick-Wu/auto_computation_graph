@@ -80,7 +80,7 @@ def resolve_default_model_path(model_name: str) -> Path:
 
 def resolve_default_graph_dir(model_name: str, experiment: str) -> Path:
     scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment / "patch_runs"
+    return scratch_root / "traces" / model_name / experiment / "graphs"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
@@ -117,6 +117,26 @@ def extract_final_answer_value(text: Optional[str]) -> Optional[float]:
         normalized = normalize_number_string(candidate)
         return float(normalized) if normalized is not None else None
     return None
+
+
+def extract_last_number_value(text: Optional[str]) -> Optional[float]:
+    """Fallback: use the last numeric mention when explicit final-answer phrasing is absent."""
+    if not text:
+        return None
+    matches = list(NUMBER_PATTERN.finditer(text))
+    if not matches:
+        return None
+    candidate = matches[-1].group(0)
+    normalized = normalize_number_string(candidate)
+    return float(normalized) if normalized is not None else None
+
+
+def extract_answer_value(text: Optional[str]) -> Optional[float]:
+    """Primary+fallback answer extractor used for intervention scoring."""
+    out = extract_final_answer_value(text)
+    if out is not None:
+        return out
+    return extract_last_number_value(text)
 
 
 def compute_relative_error(observed: float, expected: float) -> float:
@@ -248,7 +268,7 @@ def get_pair_trace_text(pair: Dict) -> Optional[str]:
         return None
     
     nested_pair = pair.get("pair", {}) if isinstance(pair.get("pair"), dict) else {}
-    nested_source = nested_pair.get("source", {}) if isinstance(nested_source.get("source"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
     
     trace_text = (
         nested_source.get("generated_text") or
@@ -488,21 +508,27 @@ def run_validation_on_pair(
     
     results = []
     trace_text = None
-    expected_answer = None
     
-    # Load graph.json alongside pair
-    graph_path = pair_path.parent / "graph.json"
+    # Load graph.json from the pair directory itself.
+    graph_path = pair_path / "graph.json"
     graph = load_graph_json(graph_path)
     if not graph:
         return results
     
-    pair = aligned_pairs_dict.get(str(pair_id))
+    pair_lookup_keys = [str(pair_id)]
+    if str(pair_id).startswith("pair"):
+        pair_lookup_keys.append(str(pair_id)[4:])
+
+    pair = None
+    for key in pair_lookup_keys:
+        pair = aligned_pairs_dict.get(key)
+        if pair is not None:
+            break
     if not pair:
         return results
     
     trace_text = get_pair_trace_text(pair)
-    expected_answer = get_pair_expected_answer(pair)
-    if not trace_text or expected_answer is None:
+    if not trace_text:
         return results
     
     node_stats = graph.get("node_stats", {})
@@ -518,10 +544,13 @@ def run_validation_on_pair(
         parents_of[dst].add(src)
         children_of[src].add(dst)
     
-    # Test a subset of nodes as truncation points
-    test_nodes = [n for n in nodes.keys() if n != "prompt"]  # exclude prompt-value-only nodes
+    # Test a subset of nodes as truncation points, prioritizing nodes with parents.
+    all_nodes = [n for n in nodes.keys() if n != "prompt"]
+    nodes_with_parents = [n for n in all_nodes if len(parents_of.get(n, set())) > 0]
+    fallback_nodes = [n for n in all_nodes if n not in nodes_with_parents]
+    test_nodes = nodes_with_parents + fallback_nodes
     if len(test_nodes) > 5:
-        test_nodes = test_nodes[:5]  # limit to first 5 if many
+        test_nodes = test_nodes[:5]
     
     # Batch up all tests to run in parallel
     pending_tests: List[Tuple[InterventionResult, str, List[str], str]] = []  # (result_obj, truncated_text, corrupted_node_ids, control_type)
@@ -614,7 +643,7 @@ def run_validation_on_pair(
                         corrupted_text = corrupt_node_in_trace(
                             corrupted_text, corrupt_node_id, value_text,
                             (char_start, char_end), 
-                            batch[batch_start].corruption_method,
+                            result.corruption_method,
                         )
             intervened_texts.append(corrupted_text)
         
@@ -625,8 +654,8 @@ def run_validation_on_pair(
             baseline_text, baseline_len = baselines[i]
             intervened_text, intervened_len = intervened[i]
             
-            baseline_answer = extract_final_answer_value(baseline_text)
-            intervened_answer = extract_final_answer_value(intervened_text)
+            baseline_answer = extract_answer_value(baseline_text)
+            intervened_answer = extract_answer_value(intervened_text)
             
             result.baseline_answer = baseline_answer
             result.intervened_answer = intervened_answer
@@ -698,6 +727,12 @@ def main():
     graph_dir = args.graph_dir or resolve_default_graph_dir(args.model_name, args.experiment)
     output_json = args.output_json or resolve_default_output_json(args.model_name, args.experiment)
     
+    # Backward compatibility: if caller passes patch_runs, redirect to sibling graphs dir.
+    if graph_dir.name == "patch_runs":
+        candidate = graph_dir.parent / "graphs"
+        if candidate.exists():
+            graph_dir = candidate
+
     if not graph_dir.exists():
         raise FileNotFoundError(f"Graph directory not found: {graph_dir}")
     
@@ -705,6 +740,7 @@ def main():
     dtype = torch.float16 if args.dtype == "float16" else torch.float32
     model = AutoModelForCausalLM.from_pretrained(str(model_path), torch_dtype=dtype, device_map=args.device)
     tokenizer = AutoTokenizer.from_pretrained(str(model_path))
+    tokenizer.padding_side = "left"
     
     print(f"Loading graphs from: {graph_dir}")
     

@@ -1,19 +1,28 @@
 #!/bin/bash
-# Test node skipping: can we bypass intermediate values?
+#SBATCH --job-name=skip_nodes
+#SBATCH --time=0-04:00:00 # D-HH:MM
+#SBATCH --account=def-rgrosse
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=4
+#SBATCH --gpus-per-node=h100:1
 
 set -euo pipefail
+
+module load python/3.11.5
+module load cuda/12.6
+module load scipy-stack/2023b
+module load arrow/21.0.0
 
 MODEL_NAME="${1:-Qwen2.5-72B}"
 EXPERIMENT="${2:-velocity}"
 GRAPH_DIR="${3:-}"
 MAX_PAIRS="${4:-5}"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$REPO_ROOT/auto_computation_graph"
+cd "/home/wuroderi/projects/def-zhijing/wuroderi/auto_computation_graph"
 
 if [[ -z "$GRAPH_DIR" ]]; then
     SCRATCH_ROOT="$HOME/scratch"
-    GRAPH_DIR="$SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT/patch_runs"
+    GRAPH_DIR="$SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT/graphs"
 fi
 
 echo "Testing node skipping for: $EXPERIMENT on $MODEL_NAME"
