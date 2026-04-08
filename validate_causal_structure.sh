@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=validate_causal_structure
-#SBATCH --time=0-04:00:00 # D-HH:MM
+#SBATCH --time=0-00:30:00 # D-HH:MM
 #SBATCH --account=def-rgrosse
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4

@@ -544,11 +544,11 @@ def run_validation_on_pair(
         parents_of[dst].add(src)
         children_of[src].add(dst)
     
-    # Test a subset of nodes as truncation points, prioritizing nodes with parents.
-    all_nodes = [n for n in nodes.keys() if n != "prompt"]
-    nodes_with_parents = [n for n in all_nodes if len(parents_of.get(n, set())) > 0]
-    fallback_nodes = [n for n in all_nodes if n not in nodes_with_parents]
-    test_nodes = nodes_with_parents + fallback_nodes
+    # Test only connected nodes with parents. Disconnected nodes are graph-construction noise.
+    connected_nodes = {edge["source"] for edge in edges} | {edge["target"] for edge in edges}
+    all_nodes = [n for n in nodes.keys() if n != "prompt" and n in connected_nodes]
+    all_nodes.sort(key=lambda n: int(node_stats.get(n, {}).get("truncation_token_index", -1)), reverse=True)
+    test_nodes = [n for n in all_nodes if len(parents_of.get(n, set())) > 0]
     if len(test_nodes) > 5:
         test_nodes = test_nodes[:5]
     
@@ -631,7 +631,7 @@ def run_validation_on_pair(
         
         # Generate intervened versions
         intervened_texts = []
-        for (_, truncated, corrupted_node_ids, _) in batch:
+        for (result_obj, truncated, corrupted_node_ids, _) in batch:
             corrupted_text = truncated
             for corrupt_node_id in corrupted_node_ids:
                 node_value_texts = [n.get("value_texts", []) for n in graph["nodes"] if n.get("id") == corrupt_node_id]
@@ -643,7 +643,7 @@ def run_validation_on_pair(
                         corrupted_text = corrupt_node_in_trace(
                             corrupted_text, corrupt_node_id, value_text,
                             (char_start, char_end), 
-                            result.corruption_method,
+                            result_obj.corruption_method,
                         )
             intervened_texts.append(corrupted_text)
         

@@ -21,7 +21,7 @@ import subprocess
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -160,6 +160,81 @@ def build_value_alignment_line(pair_record: Optional[Dict], trace_text: str) -> 
                 line[pos] = ch
 
     return "".join(line).rstrip()
+
+
+def build_excluded_shared_value_indices(pair_record: Optional[Dict]) -> Set[int]:
+    """Identify values shared across source/counterfactual that only appear in the CoT.
+
+    Shared prompt values are kept. Shared numeric literals that begin after the prompt
+    are usually step numbers or formula constants, and should not become graph nodes.
+    """
+    if not isinstance(pair_record, dict):
+        return set()
+
+    nested_pair = pair_record.get("pair", {}) if isinstance(pair_record.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+    nested_cf = nested_pair.get("counterfactual", {}) if isinstance(nested_pair.get("counterfactual"), dict) else {}
+
+    source_values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
+    cf_values = nested_cf.get("values", []) if isinstance(nested_cf.get("values"), list) else []
+    prompt_text = str(pair_record.get("prompt", "") or "")
+    prompt_len = len(prompt_text)
+
+    excluded: Set[int] = set()
+    for vidx, (src, cf) in enumerate(zip(source_values, cf_values)):
+        if not isinstance(src, dict) or not isinstance(cf, dict):
+            continue
+        src_norm = str(src.get("normalized_value", "")).strip()
+        cf_norm = str(cf.get("normalized_value", "")).strip()
+        if not src_norm or src_norm != cf_norm:
+            continue
+        span_start = src.get("span_start")
+        if isinstance(span_start, int) and span_start >= prompt_len:
+            excluded.add(vidx)
+
+    return excluded
+
+
+def build_excluded_shared_value_metadata(pair_record: Optional[Dict]) -> List[Dict[str, object]]:
+    """Return structured metadata for shared CoT-only values that are excluded from the graph."""
+    if not isinstance(pair_record, dict):
+        return []
+
+    nested_pair = pair_record.get("pair", {}) if isinstance(pair_record.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+    nested_cf = nested_pair.get("counterfactual", {}) if isinstance(nested_pair.get("counterfactual"), dict) else {}
+
+    source_values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
+    cf_values = nested_cf.get("values", []) if isinstance(nested_cf.get("values"), list) else []
+    prompt_text = str(pair_record.get("prompt", "") or "")
+    prompt_len = len(prompt_text)
+
+    excluded: List[Dict[str, object]] = []
+    for vidx, (src, cf) in enumerate(zip(source_values, cf_values)):
+        if not isinstance(src, dict) or not isinstance(cf, dict):
+            continue
+
+        src_norm = str(src.get("normalized_value", "")).strip()
+        cf_norm = str(cf.get("normalized_value", "")).strip()
+        if not src_norm or src_norm != cf_norm:
+            continue
+
+        span_start = src.get("span_start")
+        if not isinstance(span_start, int) or span_start < prompt_len:
+            continue
+
+        excluded.append(
+            {
+                "value_index": vidx,
+                "value_text": src.get("value_text"),
+                "normalized_value": src_norm,
+                "span_start": span_start,
+                "span_end": src.get("span_end"),
+                "reason": "shared_cot_constant",
+            }
+        )
+
+    return excluded
 
 
 def build_truncation_label_row(graph: Dict, width: int = 120) -> str:
@@ -451,39 +526,16 @@ def map_tokens_to_parent_nodes(
     return mapped
 
 
-def _collapse_records_by_truncation(records: Dict[str, MatrixRecord]) -> Tuple[Dict[str, MatrixRecord], Dict[str, List[MatrixRecord]]]:
-    by_trunc: Dict[int, List[MatrixRecord]] = {}
+def _validate_records_by_value(records: Dict[str, MatrixRecord]) -> Dict[str, MatrixRecord]:
+    """Ensure each value_index appears at most once. If duplicates exist, keep the first."""
+    by_value: Dict[int, MatrixRecord] = {}
     for rec in records.values():
-        by_trunc.setdefault(rec.truncation_token_index, []).append(rec)
-
-    collapsed: Dict[str, MatrixRecord] = {}
-    grouped_by_canonical: Dict[str, List[MatrixRecord]] = {}
-
-    for trunc, group in by_trunc.items():
-        group_sorted = sorted(
-            group,
-            key=lambda r: (r.value_index < 0, r.value_index if r.value_index >= 0 else 10**9, r.node_id),
-        )
-        canonical = group_sorted[0]
-
-        same_shape = all(g.diff_delta_matrix.shape == canonical.diff_delta_matrix.shape for g in group_sorted)
-        if same_shape and len(group_sorted) > 1:
-            merged_diff = np.mean(np.stack([g.diff_delta_matrix for g in group_sorted], axis=0), axis=0).astype(np.float32)
-        else:
-            merged_diff = canonical.diff_delta_matrix
-
-        collapsed_rec = MatrixRecord(
-            pair_id=canonical.pair_id,
-            node_id=canonical.node_id,
-            value_index=canonical.value_index,
-            truncation_token_index=trunc,
-            position_indices=list(canonical.position_indices),
-            diff_delta_matrix=merged_diff,
-        )
-        collapsed[collapsed_rec.node_id] = collapsed_rec
-        grouped_by_canonical[collapsed_rec.node_id] = group_sorted
-
-    return collapsed, grouped_by_canonical
+        if rec.value_index < 0:
+            by_value[rec.value_index] = rec
+        elif rec.value_index not in by_value:
+            by_value[rec.value_index] = rec
+    
+    return {rec.node_id: rec for rec in by_value.values()}
 
 
 def build_graph_for_pair(
@@ -491,36 +543,55 @@ def build_graph_for_pair(
     cfg: GraphBuildConfig,
     value_label_by_index: Optional[Dict[int, str]] = None,
     value_token_ranges_by_index: Optional[Dict[int, Tuple[int, int]]] = None,
+    excluded_value_indices: Optional[Set[int]] = None,
+    excluded_shared_value_metadata: Optional[List[Dict[str, object]]] = None,
 ) -> Dict:
     if value_label_by_index is None:
         value_label_by_index = {}
     if value_token_ranges_by_index is None:
         value_token_ranges_by_index = {}
+    if excluded_value_indices is None:
+        excluded_value_indices = set()
+    if excluded_shared_value_metadata is None:
+        excluded_shared_value_metadata = []
 
-    records, grouped_by_canonical = _collapse_records_by_truncation(records)
+    records = {
+        nid: rec
+        for nid, rec in records.items()
+        if rec.value_index not in excluded_value_indices
+    }
 
+    records = _validate_records_by_value(records)
+
+    # Each record is its own node; no collapsing by truncation index
     node_to_value_indices: Dict[str, List[int]] = {}
     node_to_token_positions: Dict[str, set] = {}
     node_to_trunc: Dict[str, int] = {}
     for nid, rec in records.items():
-        grouped = grouped_by_canonical.get(nid, [rec])
-        vidxs = sorted({r.value_index for r in grouped if r.value_index >= 0})
-        node_to_value_indices[nid] = vidxs
+        # Each node represents exactly one value
+        if rec.value_index >= 0:
+            node_to_value_indices[nid] = [rec.value_index]
+            token_range = value_token_ranges_by_index.get(rec.value_index)
+            if token_range is not None:
+                start, end = token_range
+                if end > start:
+                    node_to_token_positions[nid] = set(range(start, end))
+                else:
+                    node_to_token_positions[nid] = set()
+            else:
+                node_to_token_positions[nid] = set()
+        else:
+            # Tail node
+            node_to_value_indices[nid] = []
+            node_to_token_positions[nid] = set()
+        
         node_to_trunc[nid] = rec.truncation_token_index
-
-        token_positions = set()
-        for vidx in vidxs:
-            token_range = value_token_ranges_by_index.get(vidx)
-            if token_range is None:
-                continue
-            start, end = token_range
-            if end > start:
-                token_positions.update(range(start, end))
-        node_to_token_positions[nid] = token_positions
 
     # Include values that have aligned token spans but no patching record (e.g.,
     # prompt values). These can still contribute as parent-only nodes.
     for vidx, token_range in value_token_ranges_by_index.items():
+        if vidx in excluded_value_indices:
+            continue
         nid = f"v{vidx}"
         if nid in node_to_value_indices:
             continue
@@ -647,25 +718,21 @@ def build_graph_for_pair(
         rec = records.get(nid)
         if rec is not None:
             value_index = rec.value_index
-            alias_node_ids = [r.node_id for r in grouped_by_canonical.get(nid, [rec])]
         else:
             vidxs = node_to_value_indices.get(nid, [])
             value_index = vidxs[0] if vidxs else -1
-            alias_node_ids = [nid]
+
+        vidxs = node_to_value_indices.get(nid, [])
+        value_texts = [value_label_by_index.get(idx, "") for idx in vidxs if idx in value_label_by_index]
 
         graph_nodes.append(
             {
                 "id": nid,
-                "label": (f"{','.join([f'v{idx}' for idx in node_to_value_indices.get(nid, [])])}" if node_to_value_indices.get(nid) else nid),
+                "label": ("v" + str(value_index) if value_index >= 0 else nid),
                 "truncation_token_index": int(trunc),
                 "value_index": value_index,
-                "value_indices": node_to_value_indices.get(nid, []),
-                "value_texts": [
-                    value_label_by_index[idx]
-                    for idx in node_to_value_indices.get(nid, [])
-                    if idx in value_label_by_index
-                ],
-                "alias_node_ids": alias_node_ids,
+                "value_indices": vidxs,
+                "value_texts": value_texts,
             }
         )
 
@@ -683,6 +750,7 @@ def build_graph_for_pair(
         "nodes": graph_nodes,
         "edges": graph_edges,
         "node_stats": node_stats,
+        "excluded_shared_values": excluded_shared_value_metadata,
     }
 
 
@@ -961,12 +1029,16 @@ def main() -> None:
         pair_record = get_pair_record(pair_id, aligned_pairs_dict)
         value_label_by_index = build_value_label_by_index(pair_record)
         value_token_ranges_by_index = build_value_token_ranges_by_index(pair_record)
+        excluded_value_indices = build_excluded_shared_value_indices(pair_record)
+        excluded_shared_value_metadata = build_excluded_shared_value_metadata(pair_record)
 
         graph = build_graph_for_pair(
             records=records,
             cfg=cfg,
             value_label_by_index=value_label_by_index,
             value_token_ranges_by_index=value_token_ranges_by_index,
+            excluded_value_indices=excluded_value_indices,
+            excluded_shared_value_metadata=excluded_shared_value_metadata,
         )
 
         pair_out_dir = output_dir / pair_name
@@ -1005,6 +1077,7 @@ def main() -> None:
                 "pair": pair_name,
                 "n_nodes": len(graph["nodes"]),
                 "n_edges": len(graph["edges"]),
+                "n_excluded_shared_values": len(graph.get("excluded_shared_values", [])),
                 "root": graph["root"],
                 "graph_json": str(graph_json),
                 "graph_dot": str(dot_file),

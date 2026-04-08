@@ -335,11 +335,12 @@ def test_node_skipping_on_pair(
     node_stats = graph.get("node_stats", {})
     nodes = {n["id"]: n for n in graph.get("nodes", [])}
     
-    # Focus on value nodes, prioritizing those with ancestors.
-    reachable_nodes = [n for n in nodes.keys() if n.startswith("v")]
+    # Focus on connected value nodes, prioritizing those with ancestors.
+    connected_nodes = {edge["source"] for edge in graph.get("edges", [])} | {edge["target"] for edge in graph.get("edges", [])}
+    reachable_nodes = [n for n in nodes.keys() if n.startswith("v") and n in connected_nodes]
+    reachable_nodes.sort(key=lambda n: int(node_stats.get(n, {}).get("truncation_token_index", -1)), reverse=True)
     nodes_with_ancestors = [n for n in reachable_nodes if len(build_parent_chain(n, graph)) > 1]
-    fallback_nodes = [n for n in reachable_nodes if n not in nodes_with_ancestors]
-    candidate_nodes = nodes_with_ancestors + fallback_nodes
+    candidate_nodes = nodes_with_ancestors
     
     # Batch up all skip tests to run in parallel
     pending_tests: List[Tuple[SkippingTest, str, str]] = []  # (test_obj, forced_prompt, target_node)
