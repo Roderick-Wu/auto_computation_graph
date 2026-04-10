@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=patch_graph_nopair
-#SBATCH --time=0-8:00:00 # D-HH:MM
+#SBATCH --time=0-48:00:00 # D-HH:MM
 #SBATCH --account=def-rgrosse
 #SBATCH --mem=64G
 #SBATCH --gpus-per-node=h100:1

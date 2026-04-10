@@ -130,6 +130,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
+    def _values_differ(source_meta: Dict, cf_meta: Dict) -> bool:
+        src_norm = source_meta.get("normalized_value")
+        cf_norm = cf_meta.get("normalized_value")
+        if src_norm is not None and cf_norm is not None:
+            return str(src_norm) != str(cf_norm)
+
+        src_text = source_meta.get("value_text")
+        cf_text = cf_meta.get("value_text")
+        if src_text is not None and cf_text is not None:
+            return str(src_text) != str(cf_text)
+
+        return False
+
     pairs = payload.get("pairs")
     if not isinstance(pairs, list):
         return []
@@ -138,16 +151,20 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
     for pidx, pair in enumerate(pairs):
         pair_id = pair.get("id", pidx)
         source_block = pair.get("pair", {}).get("source", {})
+        cf_block = pair.get("pair", {}).get("counterfactual", {})
 
         # Skip pairs that post-processing flagged as tokenization/alignment failures.
         token_counts_equal = pair.get("post_process", {}).get("token_counts_equal")
         if token_counts_equal is False:
             continue
 
-        # Use the source/original trace only. The counterfactual side is ignored.
+        # Use source + counterfactual traces to locate changed numeric spans.
         source_token_ids = source_block.get("tokens") if isinstance(source_block.get("tokens"), list) else []
+        cf_token_ids = cf_block.get("tokens") if isinstance(cf_block.get("tokens"), list) else []
         source_text = source_block.get("generated_text", "")
-        if not source_token_ids:
+        if not source_token_ids or not cf_token_ids:
+            continue
+        if len(source_token_ids) != len(cf_token_ids):
             continue
 
         # Find where the CoT starts ("Answer (step-by-step)")
@@ -172,10 +189,11 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
                     continue
                 # Check if value's source span starts in CoT region
                 source_span = mv.get("source", {})
+                cf_span = mv.get("counterfactual", {})
                 span_start = source_span.get("span_start")
                 if span_start is None:
                     span_start = source_span.get("span", {}).get("start")
-                if span_start is not None and span_start >= cot_start_pos:
+                if span_start is not None and span_start >= cot_start_pos and _values_differ(source_span, cf_span):
                     cot_values.append(mv)
 
         # Sort in reverse order by span start position (final answer first)
@@ -189,31 +207,48 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         cot_values.sort(key=_mv_span_start, reverse=True)
 
         if cot_values:
+            used_trunc_indices = set()
             for v_idx, mv in enumerate(cot_values):
-                pos = mv.get("position")
                 src_meta = mv.get("source", {})
+                cf_meta = mv.get("counterfactual", {})
 
                 src_tok_start = src_meta.get("token_start")
                 src_tok_end = src_meta.get("token_end")
-                if not isinstance(src_tok_start, int):
+                cf_tok_start = cf_meta.get("token_start")
+                cf_tok_end = cf_meta.get("token_end")
+                if not isinstance(src_tok_start, int) or not isinstance(cf_tok_start, int):
                     continue
 
-                # Prefer scoring the first token inside the matched numeric span.
-                if isinstance(src_tok_end, int):
-                    span_start = max(0, src_tok_start)
-                    span_end = min(len(source_token_ids), src_tok_end)
+                # Prefer scoring the first differing token inside the matched numeric span.
+                if isinstance(src_tok_end, int) and isinstance(cf_tok_end, int):
+                    span_start = max(0, min(src_tok_start, cf_tok_start))
+                    span_end = min(len(source_token_ids), len(cf_token_ids), src_tok_end, cf_tok_end)
                 else:
-                    span_start = max(0, src_tok_start)
+                    span_start = max(0, min(src_tok_start, cf_tok_start))
                     span_end = span_start + 1
 
+                if span_end <= span_start:
+                    continue
+
                 trunc_idx = span_start
-                if trunc_idx < span_end and trunc_idx >= len(source_token_ids):
+                found_diff = False
+                for t in range(span_start, span_end):
+                    if source_token_ids[t] != cf_token_ids[t]:
+                        trunc_idx = t
+                        found_diff = True
+                        break
+
+                if not found_diff:
                     continue
 
                 if trunc_idx <= 0:
                     continue
                 if trunc_idx >= len(source_token_ids):
                     continue
+                if trunc_idx in used_trunc_indices:
+                    continue
+
+                used_trunc_indices.add(trunc_idx)
 
                 experiments.append(
                     {
@@ -221,28 +256,6 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
                         "pair_id": pair_id,
                         "value_index": v_idx,
                         "experiment_type": "noise_value_match",
-                        "truncation_token_index": trunc_idx,
-                        "source": {
-                            "token_ids": source_token_ids,
-                            "score_token_id": int(source_token_ids[trunc_idx]),
-                        },
-                        "target": {
-                            "token_ids": source_token_ids,
-                            "score_token_id": int(source_token_ids[trunc_idx]),
-                        },
-                    }
-                )
-        else:
-            # Fallback: if no CoT values found, use tail position.
-            usable_len = len(source_token_ids)
-            if usable_len > 1:
-                trunc_idx = usable_len - 1
-                experiments.append(
-                    {
-                        "experiment_id": f"pair{pair_id}_tail",
-                        "pair_id": pair_id,
-                        "value_index": -1,
-                        "experiment_type": "noise_tail_fallback",
                         "truncation_token_index": trunc_idx,
                         "source": {
                             "token_ids": source_token_ids,
@@ -297,6 +310,7 @@ def build_experiments_from_traces(payload: Dict) -> List[Dict]:
         cot_values.sort(key=_value_span_start, reverse=True)
 
         if cot_values:
+            used_trunc_indices = set()
             for v_idx, value_obj in enumerate(cot_values):
                 src_tok_start = value_obj.get("token_start")
                 src_tok_end = value_obj.get("token_end")
@@ -310,6 +324,10 @@ def build_experiments_from_traces(payload: Dict) -> List[Dict]:
 
                 if trunc_idx <= 0 or trunc_idx >= len(source_token_ids):
                     continue
+                if trunc_idx in used_trunc_indices:
+                    continue
+
+                used_trunc_indices.add(trunc_idx)
 
                 experiments.append(
                     {
