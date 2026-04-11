@@ -15,9 +15,14 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import sys
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from workspace_paths import resolve_auto_traces_root, resolve_model_path, resolve_project_root
 
 
 @dataclass
@@ -62,13 +67,12 @@ class RejectionReport:
 
 
 def resolve_default_model_path(model_name: str) -> Path:
-    return REPO_ROOT / "models" / model_name
+    return resolve_model_path(model_name)
 
 
 def resolve_traces_dir(model_name: str, experiment: str) -> Path:
     """Resolve path to experiment traces directory."""
-    scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment
+    return resolve_auto_traces_root(model_name, experiment)
 
 
 def get_all_experiments(model_name: str) -> List[str]:
@@ -76,7 +80,7 @@ def get_all_experiments(model_name: str) -> List[str]:
     try:
         result = subprocess.run(
             ["python", "list_all_experiments.py"],
-            cwd=str(REPO_ROOT / "auto_computation_graph"),
+            cwd=str(resolve_project_root() / "auto_computation_graph"),
             capture_output=True,
             text=True,
             timeout=10,

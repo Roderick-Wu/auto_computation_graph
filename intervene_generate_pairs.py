@@ -14,6 +14,7 @@ import os
 import random
 import re
 import time
+import sys
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,10 @@ import prompts
 
 load_dotenv()
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from workspace_paths import resolve_model_path, resolve_scratch_root
 
 NUMBER_PATTERN = re.compile(r"(?<![\\w.])[-+]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?(?:[eE][-+]?\\d+)?(?![\\w.])")
 UNIT_PATTERN = re.compile(r"^\\s*([A-Za-z%\\/\\^\\*\\-]+(?:\\/[A-Za-z%\\/\\^\\*\\-]+)?)")
@@ -39,20 +44,18 @@ def is_numeric_scalar(value: Any) -> bool:
 
 
 def resolve_default_traces_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "scratch"
-    preferred = scratch_root / "traces" / model_name / experiment / "reject_traces.json"
+    preferred = resolve_scratch_root() / "traces" / model_name / experiment / "reject_traces.json"
     if preferred.exists():
         return preferred
-    return scratch_root / "traces" / model_name / experiment / "fixed_traces.json"
+    return resolve_scratch_root() / "traces" / model_name / experiment / "fixed_traces.json"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment / "paired_traces.json"
+    return resolve_scratch_root() / "traces" / model_name / experiment / "paired_traces.json"
 
 
 def resolve_default_tokenizer_path(model_name: str) -> Path:
-    return REPO_ROOT / "models" / model_name
+    return resolve_model_path(model_name)
 
 
 def load_trace_list_from_json(path: Path) -> List[Dict[str, Any]]:

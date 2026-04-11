@@ -18,9 +18,14 @@ fi
 experiment="$1"
 model_name="${2:-Qwen2.5-32B}"
 
-scratch_root="$HOME/scratch"
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
-traces_dir="$scratch_root/traces/$model_name/$experiment"
+module load python/3.11.5 cuda/12.6 scipy-stack/2023b arrow/21.0.0
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
+traces_dir="$WRODERI_SCRATCH_ROOT/traces/$model_name/$experiment"
 input_json="$traces_dir/reject_traces.json"
 if [ ! -f "$input_json" ]; then
     legacy_traces_json="$traces_dir/fixed_traces.json"
@@ -36,11 +41,7 @@ if [ ! -f "$input_json" ]; then
 fi
 
 output_root_dir="$traces_dir/patch_solo"
-model_path="/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/$model_name"
-
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
-
-module load python/3.11.5 cuda/12.6 scipy-stack/2023b arrow/21.0.0
+model_path="$WRODERI_MODELS_ROOT/$model_name"
 
 echo "Running no-pair patching on experiment: $experiment"
 echo "Input: $input_json"

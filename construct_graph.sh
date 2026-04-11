@@ -12,12 +12,18 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 # Load required modules
 module load python/3.11.5 scipy-stack/2023b arrow/21.0.0
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 # Default experiment (e.g., "velocity")
 EXPERIMENT=${1:-velocity}
 MODEL_NAME=${2:-Qwen2.5-32B}
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 # Input/output paths
-TRACES_DIR="/home/wuroderi/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
+TRACES_DIR="$WRODERI_SCRATCH_ROOT/traces/${MODEL_NAME}/${EXPERIMENT}"
 PATCH_RUNS_DIR="${TRACES_DIR}/patch_runs"
 OUTPUT_DIR="${TRACES_DIR}/graphs"
 

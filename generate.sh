@@ -13,6 +13,9 @@ module load python/3.11.5
 module load cuda/12.6
 module load scipy-stack/2023b
 module load arrow/21.0.0
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
 #module load python cuda scipy-stack arrow
 
 #source venv/bin/activate
@@ -22,8 +25,8 @@ module load arrow/21.0.0
 EXPERIMENT=${1:-velocity}
 MODEL_NAME=${2:-Qwen2.5-32B}
 N_PROMPTS=${3:-50}
-MODEL_PATH=/home/wuroderi/links/projects/def-rgrosse/wuroderi/models/$MODEL_NAME
-OUTPUT_DIR=/home/wuroderi/scratch/traces/$MODEL_NAME/$EXPERIMENT
+MODEL_PATH="$WRODERI_MODELS_ROOT/$MODEL_NAME"
+OUTPUT_DIR="$WRODERI_SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT"
 TRACE_FILE="$OUTPUT_DIR/traces.json"
 CONFIG_FILE="$OUTPUT_DIR/config.json"
 BATCH=8
@@ -64,8 +67,8 @@ PY
 	fi
 fi
 
-#python generate_traces.py --experiment current --n_prompts 200 --max_new_tokens 256 --model_path /home/wuroderi/projects/def-zhijing/wuroderi/models/QwQ-32B-Preview
+#python generate_traces.py --experiment current --n_prompts 200 --max_new_tokens 256 --model_path "$WRODERI_PROJECT_ROOT/models/QwQ-32B-Preview"
 
 python generate_traces.py --experiment "$EXPERIMENT" --n_prompts "$N_PROMPTS" --max_new_tokens 256 --model_path "$MODEL_PATH" --batch_size $BATCH
-#python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path /home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Llama3.1-8B
-#python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path /home/wuroderi/links/projects/def-rgrosse/wuroderi/models/Llama3.1-70
+#python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path "$WRODERI_MODELS_ROOT/Llama3.1-8B"
+#python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path "$WRODERI_MODELS_ROOT/Llama3.1-70"

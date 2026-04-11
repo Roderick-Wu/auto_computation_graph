@@ -22,6 +22,7 @@ Outputs are organized as:
 
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -32,6 +33,13 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from workspace_paths import resolve_auto_traces_root, resolve_model_path
+
 # ============================================================================
 # GLOBAL CONFIGURATION - EDIT THESE
 # ============================================================================
@@ -39,10 +47,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # Input can be either:
 #  - legacy truncated experiments payload with top-level "experiments"
 #  - aligned pairs payload with top-level "pairs"
-INPUT_JSON = Path("/home/wuroderi/scratch/traces/Qwen2.5-32B/velocity/aligned_pairs.json")
+INPUT_JSON = resolve_auto_traces_root("Qwen2.5-32B", "velocity") / "aligned_pairs.json"
 
 # Output directory (contains per-experiment folders)
-OUTPUT_ROOT_DIR = Path("/home/wuroderi/scratch/traces/Qwen2.5-32B/velocity/patch_runs")
+OUTPUT_ROOT_DIR = resolve_auto_traces_root("Qwen2.5-32B", "velocity") / "patch_runs"
 
 # Summary JSON across all runs
 OUTPUT_SUMMARY_JSON = OUTPUT_ROOT_DIR / "patching_summary.json"
@@ -67,7 +75,7 @@ PATCH_BATCH_SIZE = 16
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
 
-MODEL_PATH = "/home/wuroderi/projects/def-zhijing/wuroderi/models/Qwen2.5-32B"
+MODEL_PATH = str(resolve_model_path("Qwen2.5-32B"))
 TOKENIZER_PATH = MODEL_PATH
 SAVE_PLOTS = True
 RESUME = True

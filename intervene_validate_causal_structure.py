@@ -19,6 +19,7 @@ Metrics aggregated across all tested values:
 import argparse
 import json
 import re
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from decimal import Decimal
@@ -32,6 +33,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from workspace_paths import resolve_auto_traces_root, resolve_model_path
 NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\w.])")
 FINAL_ANSWER_PATTERN = re.compile(
     r"(?:the\s+answer\s+is|final\s+answer\s*(?:is|=)|answer\s*(?:is|=|:))\s*"
@@ -75,17 +80,15 @@ class CausalMetrics:
 
 
 def resolve_default_model_path(model_name: str) -> Path:
-    return REPO_ROOT / "models" / model_name
+    return resolve_model_path(model_name)
 
 
 def resolve_default_graph_dir(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment / "graphs"
+    return resolve_auto_traces_root(model_name, experiment) / "graphs"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment / "causal_validation_results.json"
+    return resolve_auto_traces_root(model_name, experiment) / "causal_validation_results.json"
 
 
 def normalize_number_string(raw: Any) -> Optional[str]:

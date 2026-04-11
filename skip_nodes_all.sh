@@ -5,7 +5,10 @@ set -euo pipefail
 
 MODEL_NAME="${1:-Qwen2.5-32B}"
 
-cd "/home/wuroderi/projects/def-zhijing/wuroderi/auto_computation_graph"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
+cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
 
 echo "Running node skipping tests for all experiments on $MODEL_NAME"
 

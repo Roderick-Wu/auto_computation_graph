@@ -11,6 +11,7 @@ Usage:
     python generate_traces.py --experiment velocity --n_prompts 250
 """
 
+import sys
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from pathlib import Path
@@ -18,6 +19,12 @@ import json
 import argparse
 from tqdm import tqdm
 import prompts
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from workspace_paths import resolve_model_path, resolve_scratch_root
 
 # ==========================================
 # CONFIGURATION
@@ -27,8 +34,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--experiment', type=str, default='velocity', 
                     help='Experiment type: velocity, current, etc.')
 
-repo_root = Path(__file__).resolve().parent.parent
-default_model_path = repo_root / 'models' / 'Qwen2.5-72B'
+default_model_path = resolve_model_path('Qwen2.5-72B')
 
 parser.add_argument('--model_path', type=str, 
                     default=str(default_model_path),
@@ -50,9 +56,8 @@ torch.manual_seed(args.seed)
 
 # Output directory
 model_name = Path(args.model_path).name
-scratch_root = Path.home() / 'scratch'
 
-OUTPUT_DIR = scratch_root / 'traces' / model_name / args.experiment
+OUTPUT_DIR = resolve_scratch_root() / 'traces' / model_name / args.experiment
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 print("="*70)

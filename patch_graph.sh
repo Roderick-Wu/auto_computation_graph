@@ -16,14 +16,20 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 #module load python cuda scipy-stack arrow
 module load python/3.11.5 cuda/12.6 scipy-stack/2023b arrow/21.0.0
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 #source venv/bin/activate
 
 # Default experiment (e.g., "velocity")
 EXPERIMENT=${1:-velocity}
 MODEL_NAME=${2:-Qwen2.5-32B}
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 # Input/output paths
-TRACES_DIR="/home/wuroderi/scratch/traces/${MODEL_NAME}/${EXPERIMENT}"
+TRACES_DIR="$WRODERI_SCRATCH_ROOT/traces/${MODEL_NAME}/${EXPERIMENT}"
 INPUT_JSON="${TRACES_DIR}/aligned_pairs.json"
 OUTPUT_ROOT_DIR="${TRACES_DIR}/patch_runs"
 #OUTPUT_ROOT_DIR="${TRACES_DIR}/patch_runs_nopair"

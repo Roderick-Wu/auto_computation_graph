@@ -15,6 +15,7 @@ No API repair is attempted anymore.
 import argparse
 import json
 import re
+import sys
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,10 @@ from transformers import AutoTokenizer
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from workspace_paths import resolve_model_path, resolve_scratch_root
 NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\w.])")
 UNIT_PATTERN = re.compile(r"^\s*([A-Za-z%\/\^\*\-]+(?:\/[A-Za-z%\/\^\*\-]+)?)")
 QUESTION_MARKER_PATTERN = re.compile(r"(?:\[\s*question\s*\]|question\s*[:\]\-])", re.IGNORECASE)
@@ -35,17 +40,15 @@ FINAL_ANSWER_PATTERN = re.compile(
 
 
 def resolve_default_input_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment / "traces.json"
+    return resolve_scratch_root() / "traces" / model_name / experiment / "traces.json"
 
 
 def resolve_default_output_json(model_name: str, experiment: str) -> Path:
-    scratch_root = Path.home() / "scratch"
-    return scratch_root / "traces" / model_name / experiment / "reject_traces.json"
+    return resolve_scratch_root() / "traces" / model_name / experiment / "reject_traces.json"
 
 
 def resolve_default_tokenizer_path(model_name: str) -> Path:
-    return REPO_ROOT / "models" / model_name
+    return resolve_model_path(model_name)
 
 
 def load_trace_list_from_json(path: Path) -> List[Dict[str, Any]]:

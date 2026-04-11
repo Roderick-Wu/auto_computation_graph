@@ -14,16 +14,18 @@ module load cuda/12.6
 module load scipy-stack/2023b
 module load arrow/21.0.0
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 MODEL_NAME="${1:-Qwen2.5-32B}"
 EXPERIMENT="${2:-velocity}"
 GRAPH_DIR="${3:-}"
 MAX_PAIRS="${4:-5}"
 
-cd "/home/wuroderi/projects/def-zhijing/wuroderi/auto_computation_graph"
+cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
 
 if [[ -z "$GRAPH_DIR" ]]; then
-    SCRATCH_ROOT="$HOME/scratch"
-    GRAPH_DIR="$SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT/graphs"
+    GRAPH_DIR="$WRODERI_SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT/graphs"
 fi
 
 echo "Testing causal structure for: $EXPERIMENT on $MODEL_NAME"
