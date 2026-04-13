@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=patch_graph_nopair
-#SBATCH --time=0-48:00:00 # D-HH:MM
+#SBATCH --time=0-8:00:00 # D-HH:MM
 #SBATCH --account=def-rgrosse
 #SBATCH --mem=64G
-#SBATCH --gpus-per-node=h100:1
+#SBATCH --gpus-per-node=h100:2
 #SBATCH --cpus-per-task=1
 
 #salloc --account=def-zhijing --mem=512G --gpus=h100:2
@@ -16,13 +16,14 @@ if [ "$#" -lt 1 ]; then
 fi
 
 experiment="$1"
-model_name="${2:-Qwen2.5-32B}"
+model_name="${2:-${MODEL_NAME:-Qwen2.5-72B}}"
+LAYER_STRIDE="${LAYER_STRIDE:-1}"
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
 module load python/3.11.5 cuda/12.6 scipy-stack/2023b arrow/21.0.0
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
 traces_dir="$WRODERI_SCRATCH_ROOT/traces/$model_name/$experiment"
@@ -46,6 +47,7 @@ model_path="$WRODERI_MODELS_ROOT/$model_name"
 echo "Running no-pair patching on experiment: $experiment"
 echo "Input: $input_json"
 echo "Output: $output_root_dir"
+echo "Layer stride: $LAYER_STRIDE"
 
 python -u intervene_graph_nopair.py \
     --input-json "$input_json" \
@@ -54,4 +56,5 @@ python -u intervene_graph_nopair.py \
     --tokenizer-path "$model_path" \
     --device cuda \
     --dtype float16 \
+    --layer-stride "$LAYER_STRIDE" \
     --patch-batch-size 16

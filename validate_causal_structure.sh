@@ -14,7 +14,7 @@ module load cuda/12.6
 module load scipy-stack/2023b
 module load arrow/21.0.0
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
 MODEL_NAME="${1:-Qwen2.5-32B}"

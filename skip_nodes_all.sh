@@ -5,7 +5,7 @@ set -euo pipefail
 
 MODEL_NAME="${1:-Qwen2.5-32B}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
 cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"

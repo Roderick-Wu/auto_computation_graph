@@ -21,7 +21,7 @@ module load python/3.11.5
 module load scipy-stack/2023b
 module load arrow/21.0.0
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
 traces_json="$WRODERI_SCRATCH_ROOT/traces/$model_name/$experiment/paired_traces.json"

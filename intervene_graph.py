@@ -65,6 +65,9 @@ EXPERIMENT_IDS = None
 # Optional layer filter (None means all layers)
 LAYERS_TO_PATCH = None
 
+# Patch every Nth layer (1 = all layers).
+LAYER_STRIDE = 1
+
 # Optional token position filter (None means all valid positions 0..seq_len-2)
 TOKEN_POSITIONS_TO_PATCH = None
 
@@ -119,6 +122,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--experiment-indices", type=str, default=None, help="Comma-separated experiment indices, e.g. '0,1,2'.")
     parser.add_argument("--experiment-ids", type=str, default=None, help="Comma-separated experiment IDs, e.g. 'pair1_value3,pair2_value0'.")
     parser.add_argument("--layers-to-patch", type=str, default=None, help="Comma-separated layer indices, or 'all'.")
+    parser.add_argument("--layer-stride", type=int, default=LAYER_STRIDE, help="Patch every Nth layer after layer filtering (1 = all layers).")
     parser.add_argument("--token-positions-to-patch", type=str, default=None, help="Comma-separated token positions, or 'all'.")
     parser.add_argument("--patch-batch-size", type=int, default=PATCH_BATCH_SIZE, help="Number of token positions to patch per forward pass for a fixed layer.")
 
@@ -519,6 +523,7 @@ def main():
     global EXPERIMENT_INDICES
     global EXPERIMENT_IDS
     global LAYERS_TO_PATCH
+    global LAYER_STRIDE
     global TOKEN_POSITIONS_TO_PATCH
     global PATCH_BATCH_SIZE
     global MODEL_PATH
@@ -536,6 +541,7 @@ def main():
     EXPERIMENT_INDICES = parse_int_list(args.experiment_indices)
     EXPERIMENT_IDS = parse_str_list(args.experiment_ids)
     LAYERS_TO_PATCH = parse_int_list(args.layers_to_patch)
+    LAYER_STRIDE = max(1, int(args.layer_stride))
     TOKEN_POSITIONS_TO_PATCH = parse_int_list(args.token_positions_to_patch)
     PATCH_BATCH_SIZE = args.patch_batch_size
 
@@ -556,6 +562,7 @@ def main():
     print(f"  Summary JSON: {OUTPUT_SUMMARY_JSON}")
     print(f"  Experiment IDs filter: {EXPERIMENT_IDS if EXPERIMENT_IDS else 'none'}")
     print(f"  Layers to patch: {LAYERS_TO_PATCH if LAYERS_TO_PATCH else 'all'}")
+    print(f"  Layer stride: every {LAYER_STRIDE} layer(s)")
     print(f"  Token positions to patch: {TOKEN_POSITIONS_TO_PATCH if TOKEN_POSITIONS_TO_PATCH else 'all'}")
     print(f"  Patch batch size: {PATCH_BATCH_SIZE}")
     print(f"  Device: {DEVICE}, Dtype: {DTYPE}")
@@ -642,6 +649,8 @@ def main():
 
         layer_indices = list(range(n_layers_total)) if LAYERS_TO_PATCH is None else list(LAYERS_TO_PATCH)
         layer_indices = [l for l in layer_indices if 0 <= l < n_layers_total]
+        if LAYER_STRIDE > 1:
+            layer_indices = [l for l in layer_indices if (l % LAYER_STRIDE) == 0]
         if not layer_indices:
             print("    Warning: no valid layers to patch, skipping.")
             continue
@@ -871,6 +880,7 @@ def main():
             "experiment_ids_filter": EXPERIMENT_IDS,
             "experiment_indices_filter": EXPERIMENT_INDICES,
             "layers_to_patch": LAYERS_TO_PATCH if LAYERS_TO_PATCH else "all",
+            "layer_stride": LAYER_STRIDE,
             "positions_to_patch": TOKEN_POSITIONS_TO_PATCH if TOKEN_POSITIONS_TO_PATCH else "all",
             "score_target_definition": "token at truncation index n (predicted from position n-1)",
             "resume": RESUME,

@@ -12,14 +12,14 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 # Load required modules
 module load python/3.11.5 scipy-stack/2023b arrow/21.0.0
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
 # Default experiment (e.g., "velocity")
 EXPERIMENT=${1:-velocity}
 MODEL_NAME=${2:-Qwen2.5-32B}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
 # Input/output paths
