@@ -6,6 +6,8 @@
 #SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=1
 
+#salloc --account=def-zhijing --mem=512G --gpus=h100:2
+
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
@@ -15,14 +17,11 @@ fi
 
 experiment="$1"
 model_name="${2:-${MODEL_NAME:-Qwen2.5-32B}}"
-PATCH_BATCH_SIZE="${PATCH_BATCH_SIZE:-16}"
-TOKEN_POSITIONS_TO_PATCH="${TOKEN_POSITIONS_TO_PATCH:-all}"
-NOISE_MODE="${NOISE_MODE:-gaussian}"
-NOISE_SCALE="${NOISE_SCALE:-1.0}"
-NOISE_SEED="${NOISE_SEED:-0}"
-NOISE_SAMPLES_PER_TOKEN="${NOISE_SAMPLES_PER_TOKEN:-10}"
+LAYER_STRIDE="${LAYER_STRIDE:-8}"
+PATCH_SCOPE="${PATCH_SCOPE:-token_all_layers}"
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
+
 module load python/3.11.5 cuda/12.6 scipy-stack/2023b arrow/21.0.0
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -46,15 +45,11 @@ fi
 output_root_dir="$traces_dir/patch_solo"
 model_path="$WRODERI_MODELS_ROOT/$model_name"
 
-echo "Running no-pair token-noise patching on experiment: $experiment"
+echo "Running no-pair patching on experiment: $experiment"
 echo "Input: $input_json"
 echo "Output: $output_root_dir"
-echo "Token positions: $TOKEN_POSITIONS_TO_PATCH"
-echo "Patch batch size: $PATCH_BATCH_SIZE"
-echo "Noise mode: $NOISE_MODE"
-echo "Noise scale: $NOISE_SCALE"
-echo "Noise seed: $NOISE_SEED"
-echo "Noise samples/token: $NOISE_SAMPLES_PER_TOKEN"
+echo "Layer stride: $LAYER_STRIDE"
+echo "Patch scope: $PATCH_SCOPE"
 
 python -u intervene_graph_nopair.py \
     --input-json "$input_json" \
@@ -63,9 +58,6 @@ python -u intervene_graph_nopair.py \
     --tokenizer-path "$model_path" \
     --device cuda \
     --dtype float16 \
-    --token-positions-to-patch "$TOKEN_POSITIONS_TO_PATCH" \
-    --noise-mode "$NOISE_MODE" \
-    --noise-scale "$NOISE_SCALE" \
-    --noise-seed "$NOISE_SEED" \
-    --noise-samples-per-token "$NOISE_SAMPLES_PER_TOKEN" \
-    --patch-batch-size "$PATCH_BATCH_SIZE"
+    --layer-stride "$LAYER_STRIDE" \
+    --patch-scope "$PATCH_SCOPE" \
+    --patch-batch-size 16
