@@ -307,6 +307,7 @@ class GraphBuildConfig:
     parent_causal_rule: str
     edge_build_scope: str
     strongest_min_weight: float
+    fallback_to_strongest_parent_on_empty: bool
     max_depth: int
 
 
@@ -358,6 +359,15 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Minimum strongest-parent weight required to add edges in strongest_plus_relative mode.",
+    )
+    p.add_argument(
+        "--fallback-to-strongest-parent-on-empty",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When token_filter_then_relative yields no kept parents for a child, "
+            "fallback to the single strongest parent based on all parent-span token scores."
+        ),
     )
     p.add_argument("--max-depth", type=int, default=100, help="Safety cap for BFS depth.")
     p.add_argument(
@@ -732,22 +742,33 @@ def build_graph_for_pair(
                     continue
                 selected_pairs.append((pos, float(abs(scores[i]))))
 
+        # Safety invariant: never allow the direct predictor token (trunc-1) into
+        # parent evidence, even if future refactors alter branch-level filtering.
+        if selected_pairs:
+            selected_pairs = [(pos, w) for (pos, w) in selected_pairs if pos != child_trunc - 1]
+
         selected_token_positions = [p for p, _ in selected_pairs]
         selected_token_scores = [w for _, w in selected_pairs]
 
         # Aggregate token evidence into parent edge weights using only tokens that
         # lie within each parent node's own value token span(s).
-        parent_bucket: Dict[str, List[float]] = {}
-        for pnode in parent_nodes:
-            parent_positions = node_to_token_positions.get(pnode, set())
-            if not parent_positions:
-                continue
-            weights = [w for pos, w in selected_pairs if pos in parent_positions]
-            if weights:
-                parent_bucket[pnode] = weights
+        def _collect_parent_strength(token_pairs: List[Tuple[int, float]]) -> Dict[str, float]:
+            parent_bucket: Dict[str, List[float]] = {}
+            for pnode in parent_nodes:
+                parent_positions = node_to_token_positions.get(pnode, set())
+                if not parent_positions:
+                    continue
+                weights = [w for pos, w in token_pairs if pos in parent_positions]
+                if weights:
+                    parent_bucket[pnode] = weights
+            return {p: float(np.max(ws)) for p, ws in parent_bucket.items()}
 
-        if parent_bucket:
-            parent_strength = {p: float(np.max(ws)) for p, ws in parent_bucket.items()}
+        parent_strength = _collect_parent_strength(selected_pairs)
+        fallback_used = False
+        fallback_parent: Optional[str] = None
+        fallback_parent_weight: Optional[float] = None
+
+        if parent_strength:
             max_w = max(parent_strength.values())
             keep_thresh = cfg.relative_edge_threshold * max_w
             kept = {p: w for p, w in parent_strength.items() if w >= keep_thresh}
@@ -758,8 +779,31 @@ def build_graph_for_pair(
                 else:
                     kept = {}
             parent_strength = kept
-        else:
-            parent_strength = {}
+
+        # Fallback for token-filter mode: if no parent survives significance/thresholding,
+        # attach the strongest parent measured over all parent-span token positions.
+        if (
+            not parent_strength
+            and cfg.parent_causal_rule == "token_filter_then_relative"
+            and cfg.fallback_to_strongest_parent_on_empty
+            and parent_nodes
+        ):
+            all_parent_pairs: List[Tuple[int, float]] = []
+            for i, pos in enumerate(rec.position_indices):
+                if not (0 <= i < scores.size):
+                    continue
+                if pos == child_trunc - 1:
+                    continue
+                all_parent_pairs.append((pos, float(abs(scores[i]))))
+            # Same safety invariant for fallback parent scoring path.
+            if all_parent_pairs:
+                all_parent_pairs = [(pos, w) for (pos, w) in all_parent_pairs if pos != child_trunc - 1]
+
+            fallback_strength = _collect_parent_strength(all_parent_pairs)
+            if fallback_strength:
+                fallback_parent, fallback_parent_weight = max(fallback_strength.items(), key=lambda kv: kv[1])
+                parent_strength = {fallback_parent: float(fallback_parent_weight)}
+                fallback_used = True
 
         for pnode, weight in parent_strength.items():
             edges[(pnode, child)] = weight
@@ -772,6 +816,9 @@ def build_graph_for_pair(
             "selected_token_positions": selected_token_positions,
             "selected_token_scores_abs": selected_token_scores,
             "mapped_parents": sorted(list(parent_strength.keys())),
+            "fallback_to_strongest_parent_used": fallback_used,
+            "fallback_parent": fallback_parent,
+            "fallback_parent_weight": fallback_parent_weight,
         }
         return sorted(list(parent_strength.keys()))
 
@@ -1093,6 +1140,7 @@ def main() -> None:
         parent_causal_rule=args.parent_causal_rule,
         edge_build_scope=args.edge_build_scope,
         strongest_min_weight=max(0.0, args.strongest_min_weight),
+        fallback_to_strongest_parent_on_empty=args.fallback_to_strongest_parent_on_empty,
         max_depth=max(1, args.max_depth),
     )
 
@@ -1141,6 +1189,7 @@ def main() -> None:
             "parent_causal_rule": cfg.parent_causal_rule,
             "edge_build_scope": cfg.edge_build_scope,
             "strongest_min_weight": cfg.strongest_min_weight,
+            "fallback_to_strongest_parent_on_empty": cfg.fallback_to_strongest_parent_on_empty,
             "max_depth": cfg.max_depth,
         },
         "pairs": [],

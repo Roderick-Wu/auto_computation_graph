@@ -29,10 +29,12 @@ case "$GRAPH_VARIANT" in
     pair|regular)
         PATCH_MATRIX_DIR="${TRACES_DIR}/patch_runs"
         OUTPUT_DIR="${TRACES_DIR}/graphs"
+        IS_NOPAIR_VARIANT=0
         ;;
     nopair|solo|noise)
         PATCH_MATRIX_DIR="${TRACES_DIR}/patch_solo"
         OUTPUT_DIR="${TRACES_DIR}/graphs_nopair"
+        IS_NOPAIR_VARIANT=1
         ;;
     *)
         echo "ERROR: Unknown graph variant: $GRAPH_VARIANT"
@@ -56,9 +58,31 @@ LAYER_AGG="${LAYER_AGG:-max_abs}"
 SELECTION_METHOD="${SELECTION_METHOD:-fdr}"
 TOP_K="${TOP_K:-5}"
 QUANTILE="${QUANTILE:-0.9}"
-FDR_Q="${FDR_Q:-0.1}"
-RELATIVE_EDGE_THRESHOLD="${RELATIVE_EDGE_THRESHOLD:-0.6}"
-PARENT_CAUSAL_RULE="${PARENT_CAUSAL_RULE:-strongest_plus_relative}"
+
+if [ -z "${FDR_Q+x}" ]; then
+    if [ "$IS_NOPAIR_VARIANT" -eq 1 ]; then
+        FDR_Q="0.2"
+    else
+        FDR_Q="0.2"
+    fi
+fi
+
+if [ -z "${RELATIVE_EDGE_THRESHOLD+x}" ]; then
+    if [ "$IS_NOPAIR_VARIANT" -eq 1 ]; then
+        RELATIVE_EDGE_THRESHOLD="0.45"
+    else
+        RELATIVE_EDGE_THRESHOLD="0.3"
+    fi
+fi
+
+if [ -z "${PARENT_CAUSAL_RULE+x}" ]; then
+    if [ "$IS_NOPAIR_VARIANT" -eq 1 ]; then
+        PARENT_CAUSAL_RULE="token_filter_then_relative"
+    else
+        PARENT_CAUSAL_RULE="strongest_plus_relative"
+    fi
+fi
+
 EDGE_BUILD_SCOPE="${EDGE_BUILD_SCOPE:-all_nodes}"
 STRONGEST_MIN_WEIGHT="${STRONGEST_MIN_WEIGHT:-0.0}"
 GRAPH_RENDER="${GRAPH_RENDER:-png}"
