@@ -2,8 +2,8 @@
 #SBATCH --job-name=patch_graph_nopair
 #SBATCH --time=0-8:00:00 # D-HH:MM
 #SBATCH --account=def-rgrosse
-#SBATCH --mem=64G
-#SBATCH --gpus-per-node=h100:1
+#SBATCH --mem=256G
+#SBATCH --gpus-per-node=h100:2
 #SBATCH --cpus-per-task=1
 
 set -euo pipefail
