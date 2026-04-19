@@ -17,7 +17,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -146,6 +146,7 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         pair_id = pair.get("id", pidx)
         source_block = pair.get("pair", {}).get("source", {})
         cf_block = pair.get("pair", {}).get("counterfactual", {})
+        source_values = source_block.get("values") if isinstance(source_block.get("values"), list) else []
 
         token_counts_equal = pair.get("post_process", {}).get("token_counts_equal")
         if token_counts_equal is False:
@@ -196,6 +197,34 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         if not cot_values:
             continue
 
+        def _resolve_source_value_position(mv: Dict) -> Optional[int]:
+            pos = mv.get("position")
+            if isinstance(pos, int) and 0 <= pos < len(source_values):
+                return pos
+
+            src = mv.get("source", {}) if isinstance(mv.get("source"), dict) else {}
+            src_ts = src.get("token_start")
+            src_te = src.get("token_end")
+            src_ss = src.get("span_start")
+            src_se = src.get("span_end")
+            src_vt = src.get("value_text")
+
+            for idx, sv in enumerate(source_values):
+                if not isinstance(sv, dict):
+                    continue
+                if src_ts is not None and sv.get("token_start") != src_ts:
+                    continue
+                if src_te is not None and sv.get("token_end") != src_te:
+                    continue
+                if src_ss is not None and sv.get("span_start") != src_ss:
+                    continue
+                if src_se is not None and sv.get("span_end") != src_se:
+                    continue
+                if src_vt is not None and sv.get("value_text") != src_vt:
+                    continue
+                return idx
+            return None
+
         used_trunc_indices = set()
         for v_idx, mv in enumerate(cot_values):
             src_meta = mv.get("source", {})
@@ -237,11 +266,18 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
 
             used_trunc_indices.add(trunc_idx)
 
+            src_pos = _resolve_source_value_position(mv)
+            if src_pos is None:
+                continue
+            global_value_index = len(source_values) - 1 - src_pos
+            if global_value_index < 0:
+                continue
+
             experiments.append(
                 {
-                    "experiment_id": f"pair{pair_id}_v{v_idx}",
+                    "experiment_id": f"pair{pair_id}_v{global_value_index}",
                     "pair_id": pair_id,
-                    "value_index": v_idx,
+                    "value_index": global_value_index,
                     "experiment_type": "noise_value_match",
                     "truncation_token_index": trunc_idx,
                     "source": {
@@ -283,14 +319,15 @@ def build_experiments_from_traces(payload: Dict) -> List[Dict]:
         trace_values = trace.get("values", [])
         cot_values = []
         if isinstance(trace_values, list):
-            for value_obj in trace_values:
+            for src_idx, value_obj in enumerate(trace_values):
                 if not isinstance(value_obj, dict):
                     continue
                 span_start = value_obj.get("span_start")
                 if isinstance(span_start, int) and span_start >= cot_start_pos:
-                    cot_values.append(value_obj)
+                    cot_values.append((src_idx, value_obj))
 
-        def _value_span_start(value_obj: Dict) -> int:
+        def _value_span_start(item: Tuple[int, Dict]) -> int:
+            _, value_obj = item
             val = value_obj.get("span_start")
             return int(val) if isinstance(val, int) else 0
 
@@ -298,7 +335,7 @@ def build_experiments_from_traces(payload: Dict) -> List[Dict]:
 
         if cot_values:
             used_trunc_indices = set()
-            for v_idx, value_obj in enumerate(cot_values):
+            for src_idx, value_obj in cot_values:
                 src_tok_start = value_obj.get("token_start")
                 if not isinstance(src_tok_start, int):
                     continue
@@ -310,12 +347,15 @@ def build_experiments_from_traces(payload: Dict) -> List[Dict]:
                     continue
 
                 used_trunc_indices.add(trunc_idx)
+                global_value_index = len(trace_values) - 1 - src_idx
+                if global_value_index < 0:
+                    continue
 
                 experiments.append(
                     {
-                        "experiment_id": f"trace{pair_id}_v{v_idx}",
+                        "experiment_id": f"trace{pair_id}_v{global_value_index}",
                         "pair_id": pair_id,
-                        "value_index": v_idx,
+                        "value_index": global_value_index,
                         "experiment_type": "noise_value_match",
                         "truncation_token_index": trunc_idx,
                         "source": {

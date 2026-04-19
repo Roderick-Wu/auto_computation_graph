@@ -176,6 +176,7 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         pair_id = pair.get("id", pidx)
         source_block = pair.get("pair", {}).get("source", {})
         cf_block = pair.get("pair", {}).get("counterfactual", {})
+        source_values = source_block.get("values") if isinstance(source_block.get("values"), list) else []
 
         token_counts_equal = pair.get("post_process", {}).get("token_counts_equal")
         if token_counts_equal is False:
@@ -227,6 +228,34 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
         if not cot_values:
             continue
 
+        def _resolve_source_value_position(mv: Dict) -> Optional[int]:
+            pos = mv.get("position")
+            if isinstance(pos, int) and 0 <= pos < len(source_values):
+                return pos
+
+            src = mv.get("source", {}) if isinstance(mv.get("source"), dict) else {}
+            src_ts = src.get("token_start")
+            src_te = src.get("token_end")
+            src_ss = src.get("span_start")
+            src_se = src.get("span_end")
+            src_vt = src.get("value_text")
+
+            for idx, sv in enumerate(source_values):
+                if not isinstance(sv, dict):
+                    continue
+                if src_ts is not None and sv.get("token_start") != src_ts:
+                    continue
+                if src_te is not None and sv.get("token_end") != src_te:
+                    continue
+                if src_ss is not None and sv.get("span_start") != src_ss:
+                    continue
+                if src_se is not None and sv.get("span_end") != src_se:
+                    continue
+                if src_vt is not None and sv.get("value_text") != src_vt:
+                    continue
+                return idx
+            return None
+
         used_trunc_indices = set()
         for v_idx, mv in enumerate(cot_values):
             src_meta = mv.get("source", {})
@@ -269,11 +298,19 @@ def build_experiments_from_pairs(payload: Dict) -> List[Dict]:
 
             used_trunc_indices.add(trunc_idx)
 
+            src_pos = _resolve_source_value_position(mv)
+            if src_pos is None:
+                # Skip ambiguous matches instead of emitting incorrect value indices.
+                continue
+            global_value_index = len(source_values) - 1 - src_pos
+            if global_value_index < 0:
+                continue
+
             experiments.append(
                 {
-                    "experiment_id": f"pair{pair_id}_v{v_idx}",
+                    "experiment_id": f"pair{pair_id}_v{global_value_index}",
                     "pair_id": pair_id,
-                    "value_index": v_idx,
+                    "value_index": global_value_index,
                     "experiment_type": "token_swap_value_match",
                     "truncation_token_index": trunc_idx,
                     "source": {
@@ -698,7 +735,26 @@ def main():
             }
 
         old_entries = pair_merged_payloads[pair_key].get("entries", [])
-        new_entries = [e for e in old_entries if e.get("experiment_id") != exp_id]
+        def _same_trunc(entry: Dict) -> bool:
+            try:
+                return int(entry.get("truncation_token_index", -1)) == int(trunc_idx)
+            except Exception:
+                return False
+
+        def _same_value_index(entry: Dict) -> bool:
+            try:
+                return int(entry.get("value_index", -999999)) == int(value_index)
+            except Exception:
+                return False
+
+        # Replace prior entries by experiment id, value index, or truncation index.
+        # This keeps resume robust across older schema variants that used local value indices.
+        new_entries = [
+            e for e in old_entries
+            if e.get("experiment_id") != exp_id
+            and not _same_trunc(e)
+            and not _same_value_index(e)
+        ]
         new_entries.append(matrix_payload)
         pair_merged_payloads[pair_key]["entries"] = new_entries
         completed_experiment_ids.add(exp_id)

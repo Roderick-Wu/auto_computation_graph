@@ -163,10 +163,10 @@ def build_value_alignment_line(pair_record: Optional[Dict], trace_text: str) -> 
 
 
 def build_excluded_shared_value_indices(pair_record: Optional[Dict]) -> Set[int]:
-    """Identify values shared across source/counterfactual that only appear in the CoT.
+    """Identify graph value indices shared across source/counterfactual.
 
-    Shared prompt values are kept. Shared numeric literals that begin after the prompt
-    are usually step numbers or formula constants, and should not become graph nodes.
+    Shared numeric literals are typically constants/step markers and should not become
+    graph nodes, regardless of whether they appear in prompt or CoT text.
     """
     if not isinstance(pair_record, dict):
         return set()
@@ -177,26 +177,26 @@ def build_excluded_shared_value_indices(pair_record: Optional[Dict]) -> Set[int]
 
     source_values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
     cf_values = nested_cf.get("values", []) if isinstance(nested_cf.get("values"), list) else []
-    prompt_text = str(pair_record.get("prompt", "") or "")
-    prompt_len = len(prompt_text)
+    source_count = len(source_values)
 
     excluded: Set[int] = set()
-    for vidx, (src, cf) in enumerate(zip(source_values, cf_values)):
+    for src_idx, (src, cf) in enumerate(zip(source_values, cf_values)):
         if not isinstance(src, dict) or not isinstance(cf, dict):
             continue
         src_norm = str(src.get("normalized_value", "")).strip()
         cf_norm = str(cf.get("normalized_value", "")).strip()
         if not src_norm or src_norm != cf_norm:
             continue
-        span_start = src.get("span_start")
-        if isinstance(span_start, int) and span_start >= prompt_len:
-            excluded.add(vidx)
+        # Graph value indices are reversed from source-order values.
+        graph_vidx = source_count - 1 - src_idx
+        if graph_vidx >= 0:
+            excluded.add(graph_vidx)
 
     return excluded
 
 
 def build_excluded_shared_value_metadata(pair_record: Optional[Dict]) -> List[Dict[str, object]]:
-    """Return structured metadata for shared CoT-only values that are excluded from the graph."""
+    """Return structured metadata for shared values excluded from the graph."""
     if not isinstance(pair_record, dict):
         return []
 
@@ -206,11 +206,10 @@ def build_excluded_shared_value_metadata(pair_record: Optional[Dict]) -> List[Di
 
     source_values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
     cf_values = nested_cf.get("values", []) if isinstance(nested_cf.get("values"), list) else []
-    prompt_text = str(pair_record.get("prompt", "") or "")
-    prompt_len = len(prompt_text)
+    source_count = len(source_values)
 
     excluded: List[Dict[str, object]] = []
-    for vidx, (src, cf) in enumerate(zip(source_values, cf_values)):
+    for src_idx, (src, cf) in enumerate(zip(source_values, cf_values)):
         if not isinstance(src, dict) or not isinstance(cf, dict):
             continue
 
@@ -219,18 +218,18 @@ def build_excluded_shared_value_metadata(pair_record: Optional[Dict]) -> List[Di
         if not src_norm or src_norm != cf_norm:
             continue
 
-        span_start = src.get("span_start")
-        if not isinstance(span_start, int) or span_start < prompt_len:
+        graph_vidx = source_count - 1 - src_idx
+        if graph_vidx < 0:
             continue
 
         excluded.append(
             {
-                "value_index": vidx,
+                "value_index": graph_vidx,
                 "value_text": src.get("value_text"),
                 "normalized_value": src_norm,
-                "span_start": span_start,
+                "span_start": src.get("span_start"),
                 "span_end": src.get("span_end"),
-                "reason": "shared_cot_constant",
+                "reason": "shared_source_counterfactual",
             }
         )
 
@@ -305,13 +304,21 @@ class GraphBuildConfig:
     fdr_q: float
     min_tokens: int
     relative_edge_threshold: float
+    parent_causal_rule: str
+    edge_build_scope: str
+    strongest_min_weight: float
     max_depth: int
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build value graphs from patching matrix JSON files.")
-    p.add_argument("--patch-runs-dir", type=Path, required=True, help="Directory containing pair*/matrix_*.json outputs.")
-    p.add_argument("--output-dir", type=Path, default=None, help="Output directory (default: <patch-runs-dir>/graphs).")
+    p.add_argument(
+        "--patch-runs-dir",
+        type=Path,
+        required=True,
+        help="Directory containing pair*/pair_matrices.json outputs from patch_runs or patch_solo.",
+    )
+    p.add_argument("--output-dir", type=Path, default=None, help="Output directory (default: <patch-dir>/graphs).")
     p.add_argument("--pair-id", type=str, default=None, help="Only process one pair id, e.g. 0 or pair0.")
 
     p.add_argument("--layer-agg", choices=["mean_abs", "max_abs", "mean_signed"], default="mean_abs")
@@ -325,6 +332,32 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.2,
         help="Keep parent edges with weight >= threshold * max_parent_weight for each child.",
+    )
+    p.add_argument(
+        "--parent-causal-rule",
+        choices=["token_filter_then_relative", "strongest_plus_relative"],
+        default="token_filter_then_relative",
+        help=(
+            "Parent selection rule. token_filter_then_relative uses selected token positions first. "
+            "strongest_plus_relative scores all parent-span positions and always keeps the strongest parent "
+            "(if above strongest-min-weight), plus parents above relative-edge-threshold."
+        ),
+    )
+    p.add_argument(
+        "--edge-build-scope",
+        choices=["root_component", "all_nodes"],
+        default="all_nodes",
+        help=(
+            "Which child nodes receive parent-selection/edge-building. "
+            "root_component only expands from root v0 backward; all_nodes applies parent selection to every "
+            "patchable value node so disconnected terminating chains are retained."
+        ),
+    )
+    p.add_argument(
+        "--strongest-min-weight",
+        type=float,
+        default=0.0,
+        help="Minimum strongest-parent weight required to add edges in strongest_plus_relative mode.",
     )
     p.add_argument("--max-depth", type=int, default=100, help="Safety cap for BFS depth.")
     p.add_argument(
@@ -434,6 +467,8 @@ def parse_matrix_file(path: Path, pair_id: str) -> Optional[MatrixRecord]:
     node_id = f"v{value_index}" if value_index >= 0 else "tail"
 
     diff = np.array(payload.get("diff_delta_matrix", []), dtype=np.float32)
+    if diff.size == 0:
+        diff = np.array(payload.get("noise_delta_matrix", []), dtype=np.float32)
     pos = payload.get("position_indices", [])
     trunc = int(payload.get("truncation_token_index", int(m.group("trunc"))))
 
@@ -459,6 +494,8 @@ def parse_matrix_payload(payload: Dict, pair_id: str) -> Optional[MatrixRecord]:
 
     node_id = f"v{value_index}" if value_index >= 0 else "tail"
     diff = np.array(payload.get("diff_delta_matrix", []), dtype=np.float32)
+    if diff.size == 0:
+        diff = np.array(payload.get("noise_delta_matrix", []), dtype=np.float32)
     pos = payload.get("position_indices", [])
     trunc = payload.get("truncation_token_index")
 
@@ -538,6 +575,30 @@ def _validate_records_by_value(records: Dict[str, MatrixRecord]) -> Dict[str, Ma
     return {rec.node_id: rec for rec in by_value.values()}
 
 
+def infer_prompt_token_cutoff(pair_record: Optional[Dict]) -> Optional[int]:
+    """Infer the first token index of CoT values (i.e., values after the prompt text)."""
+    if not isinstance(pair_record, dict):
+        return None
+
+    nested_pair = pair_record.get("pair", {}) if isinstance(pair_record.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+    values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
+    prompt_len = len(str(pair_record.get("prompt", "") or ""))
+
+    candidates: List[int] = []
+    for value_obj in values:
+        if not isinstance(value_obj, dict):
+            continue
+        span_start = value_obj.get("span_start")
+        token_start = value_obj.get("token_start")
+        if isinstance(span_start, int) and isinstance(token_start, int) and span_start >= prompt_len:
+            candidates.append(int(token_start))
+
+    if not candidates:
+        return None
+    return min(candidates)
+
+
 def build_graph_for_pair(
     records: Dict[str, MatrixRecord],
     cfg: GraphBuildConfig,
@@ -545,6 +606,7 @@ def build_graph_for_pair(
     value_token_ranges_by_index: Optional[Dict[int, Tuple[int, int]]] = None,
     excluded_value_indices: Optional[Set[int]] = None,
     excluded_shared_value_metadata: Optional[List[Dict[str, object]]] = None,
+    prompt_token_cutoff: Optional[int] = None,
 ) -> Dict:
     if value_label_by_index is None:
         value_label_by_index = {}
@@ -602,58 +664,76 @@ def build_graph_for_pair(
         node_to_token_positions[nid] = set(range(start, end))
         node_to_trunc[nid] = int(start)
 
-    if "v0" not in records:
-        # If v0 does not exist, use the node with largest truncation index as root.
-        root = max(records.values(), key=lambda r: r.truncation_token_index).node_id
-    else:
-        root = "v0"
+    if not node_to_trunc:
+        return {
+            "root": "v0",
+            "nodes": [],
+            "edges": [],
+            "node_stats": {},
+            "prompt_token_cutoff": prompt_token_cutoff,
+            "excluded_shared_values": excluded_shared_value_metadata,
+        }
 
-    visited = set()
-    frontier: List[Tuple[str, int]] = [(root, 0)]
+    if "v0" in node_to_trunc:
+        root = "v0"
+    else:
+        # If v0 does not exist, use the node with largest truncation index as root.
+        root = max(node_to_trunc.items(), key=lambda kv: kv[1])[0]
 
     edges: Dict[Tuple[str, str], float] = {}
     node_stats: Dict[str, Dict] = {}
-
-    while frontier:
-        child, depth = frontier.pop(0)
-        if child in visited:
-            continue
-        visited.add(child)
-        if depth > cfg.max_depth:
-            continue
-
+    def process_child_node(child: str) -> List[str]:
         rec = records.get(child)
         if rec is None:
-            continue
-
-        scores = aggregate_token_scores(rec.diff_delta_matrix, cfg.layer_agg)
-        token_idx_local = select_token_positions(
-            scores=scores,
-            method=cfg.selection_method,
-            top_k=cfg.top_k,
-            quantile=cfg.quantile,
-            fdr_q=cfg.fdr_q,
-            min_tokens=cfg.min_tokens,
-        )
+            return []
 
         child_trunc = rec.truncation_token_index
+        scores = aggregate_token_scores(rec.diff_delta_matrix, cfg.layer_agg)
 
-        # Exclude the token immediately before truncation since it directly predicts
-        # the truncated token and can dominate with a mechanism unrelated to parent value reuse.
+        # Parent candidates must occur earlier in sequence than child.
+        # Prompt-region nodes are parent-only anchors: they can cause later nodes,
+        # but we do not assign parents to prompt nodes themselves.
+        if prompt_token_cutoff is not None and child_trunc < prompt_token_cutoff:
+            parent_nodes = []
+        else:
+            parent_nodes = [nid for nid, t in node_to_trunc.items() if t < child_trunc and nid != child]
+
         selected_pairs: List[Tuple[int, float]] = []
-        for i in token_idx_local:
-            if not (0 <= i < len(rec.position_indices)):
-                continue
-            pos = rec.position_indices[i]
-            if pos == child_trunc - 1:
-                continue
-            selected_pairs.append((pos, float(abs(scores[i]))))
+        if cfg.parent_causal_rule == "strongest_plus_relative":
+            parent_positions_union: Set[int] = set()
+            for pnode in parent_nodes:
+                parent_positions_union.update(node_to_token_positions.get(pnode, set()))
+
+            for i, pos in enumerate(rec.position_indices):
+                if not (0 <= i < scores.size):
+                    continue
+                # Exclude the token immediately before truncation since it directly predicts
+                # the truncated token and can dominate with a mechanism unrelated to parent value reuse.
+                if pos == child_trunc - 1:
+                    continue
+                if pos in parent_positions_union:
+                    selected_pairs.append((pos, float(abs(scores[i]))))
+        else:
+            token_idx_local = select_token_positions(
+                scores=scores,
+                method=cfg.selection_method,
+                top_k=cfg.top_k,
+                quantile=cfg.quantile,
+                fdr_q=cfg.fdr_q,
+                min_tokens=cfg.min_tokens,
+            )
+            # Exclude the token immediately before truncation since it directly predicts
+            # the truncated token and can dominate with a mechanism unrelated to parent value reuse.
+            for i in token_idx_local:
+                if not (0 <= i < len(rec.position_indices)):
+                    continue
+                pos = rec.position_indices[i]
+                if pos == child_trunc - 1:
+                    continue
+                selected_pairs.append((pos, float(abs(scores[i]))))
 
         selected_token_positions = [p for p, _ in selected_pairs]
         selected_token_scores = [w for _, w in selected_pairs]
-
-        # Parent candidates must occur earlier in sequence than child.
-        parent_nodes = [nid for nid, t in node_to_trunc.items() if t < child_trunc and nid != child]
 
         # Aggregate token evidence into parent edge weights using only tokens that
         # lie within each parent node's own value token span(s).
@@ -670,23 +750,49 @@ def build_graph_for_pair(
             parent_strength = {p: float(np.max(ws)) for p, ws in parent_bucket.items()}
             max_w = max(parent_strength.values())
             keep_thresh = cfg.relative_edge_threshold * max_w
-            parent_strength = {p: w for p, w in parent_strength.items() if w >= keep_thresh}
+            kept = {p: w for p, w in parent_strength.items() if w >= keep_thresh}
+            if cfg.parent_causal_rule == "strongest_plus_relative":
+                strongest_parent, strongest_w = max(parent_strength.items(), key=lambda kv: kv[1])
+                if strongest_w >= cfg.strongest_min_weight:
+                    kept[strongest_parent] = strongest_w
+                else:
+                    kept = {}
+            parent_strength = kept
         else:
             parent_strength = {}
 
         for pnode, weight in parent_strength.items():
             edges[(pnode, child)] = weight
-            if pnode not in visited:
-                frontier.append((pnode, depth + 1))
 
         node_stats[child] = {
             "truncation_token_index": rec.truncation_token_index,
             "n_token_positions": len(rec.position_indices),
+            "n_parent_candidates": len(parent_nodes),
             "n_selected_tokens": len(selected_token_positions),
             "selected_token_positions": selected_token_positions,
             "selected_token_scores_abs": selected_token_scores,
             "mapped_parents": sorted(list(parent_strength.keys())),
         }
+        return sorted(list(parent_strength.keys()))
+
+    if cfg.edge_build_scope == "all_nodes":
+        ordered_children = sorted(records.keys(), key=lambda nid: node_to_trunc.get(nid, -1), reverse=True)
+        for child in ordered_children:
+            process_child_node(child)
+    else:
+        visited = set()
+        frontier: List[Tuple[str, int]] = [(root, 0)]
+        while frontier:
+            child, depth = frontier.pop(0)
+            if child in visited:
+                continue
+            visited.add(child)
+            if depth > cfg.max_depth:
+                continue
+            kept_parents = process_child_node(child)
+            for pnode in kept_parents:
+                if pnode not in visited:
+                    frontier.append((pnode, depth + 1))
 
     # Add stats for nodes never expanded but present.
     for nid, rec in records.items():
@@ -694,6 +800,7 @@ def build_graph_for_pair(
             node_stats[nid] = {
                 "truncation_token_index": rec.truncation_token_index,
                 "n_token_positions": len(rec.position_indices),
+                "n_parent_candidates": 0,
                 "n_selected_tokens": 0,
                 "selected_token_positions": [],
                 "selected_token_scores_abs": [],
@@ -707,6 +814,7 @@ def build_graph_for_pair(
         node_stats[nid] = {
             "truncation_token_index": int(trunc),
             "n_token_positions": 0,
+            "n_parent_candidates": 0,
             "n_selected_tokens": 0,
             "selected_token_positions": [],
             "selected_token_scores_abs": [],
@@ -750,6 +858,7 @@ def build_graph_for_pair(
         "nodes": graph_nodes,
         "edges": graph_edges,
         "node_stats": node_stats,
+        "prompt_token_cutoff": prompt_token_cutoff,
         "excluded_shared_values": excluded_shared_value_metadata,
     }
 
@@ -981,6 +1090,9 @@ def main() -> None:
         fdr_q=args.fdr_q,
         min_tokens=max(1, args.min_tokens),
         relative_edge_threshold=max(0.0, args.relative_edge_threshold),
+        parent_causal_rule=args.parent_causal_rule,
+        edge_build_scope=args.edge_build_scope,
+        strongest_min_weight=max(0.0, args.strongest_min_weight),
         max_depth=max(1, args.max_depth),
     )
 
@@ -1002,6 +1114,19 @@ def main() -> None:
         print("No pair directories found. Nothing to do.")
         return
 
+    # Remove stale output pairs that are no longer present in patch outputs.
+    valid_pair_names = {p.name for p in pair_dirs}
+    for stale_dir in sorted(output_dir.glob("pair*")):
+        if not stale_dir.is_dir():
+            continue
+        if stale_dir.name in valid_pair_names:
+            continue
+        try:
+            shutil.rmtree(stale_dir)
+            print(f"Removed stale output: {stale_dir}")
+        except Exception as e:
+            print(f"Warning: failed to remove stale output {stale_dir}: {e}")
+
     summary = {
         "schema_version": "v1",
         "config": {
@@ -1013,6 +1138,9 @@ def main() -> None:
             "fdr_q": cfg.fdr_q,
             "min_tokens": cfg.min_tokens,
             "relative_edge_threshold": cfg.relative_edge_threshold,
+            "parent_causal_rule": cfg.parent_causal_rule,
+            "edge_build_scope": cfg.edge_build_scope,
+            "strongest_min_weight": cfg.strongest_min_weight,
             "max_depth": cfg.max_depth,
         },
         "pairs": [],
@@ -1023,6 +1151,13 @@ def main() -> None:
         records = read_pair_matrices(pair_dir)
         if not records:
             print(f"[{pair_name}] No matrix records found, skipping.")
+            stale_pair_out = output_dir / pair_name
+            if stale_pair_out.exists():
+                try:
+                    shutil.rmtree(stale_pair_out)
+                    print(f"[{pair_name}] removed stale output directory: {stale_pair_out}")
+                except Exception as e:
+                    print(f"[{pair_name}] warning: failed to remove stale output directory: {e}")
             continue
 
         pair_id = pair_name.replace("pair", "")
@@ -1031,6 +1166,7 @@ def main() -> None:
         value_token_ranges_by_index = build_value_token_ranges_by_index(pair_record)
         excluded_value_indices = build_excluded_shared_value_indices(pair_record)
         excluded_shared_value_metadata = build_excluded_shared_value_metadata(pair_record)
+        prompt_token_cutoff = infer_prompt_token_cutoff(pair_record)
 
         graph = build_graph_for_pair(
             records=records,
@@ -1039,6 +1175,7 @@ def main() -> None:
             value_token_ranges_by_index=value_token_ranges_by_index,
             excluded_value_indices=excluded_value_indices,
             excluded_shared_value_metadata=excluded_shared_value_metadata,
+            prompt_token_cutoff=prompt_token_cutoff,
         )
 
         pair_out_dir = output_dir / pair_name
@@ -1078,6 +1215,7 @@ def main() -> None:
                 "n_nodes": len(graph["nodes"]),
                 "n_edges": len(graph["edges"]),
                 "n_excluded_shared_values": len(graph.get("excluded_shared_values", [])),
+                "prompt_token_cutoff": graph.get("prompt_token_cutoff"),
                 "root": graph["root"],
                 "graph_json": str(graph_json),
                 "graph_dot": str(dot_file),

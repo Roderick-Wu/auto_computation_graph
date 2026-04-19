@@ -1,0 +1,27 @@
+digraph pair9 {
+  rankdir=RL;
+  labelloc="b";
+  labeljust="l";
+  label="Base Trace: Question: Given a 15.00 kg body accelerated by 75.00 N from rest, calculate the distance traveled in 7.000 seconds. Answer (step-by-step): 1. Calculate the acceleration of the body using the formula a = F / m, where F is the force applied and m is the mass of the body. 2. Substitute the given values into the formula: a = 75.00 N / 15.00 kg = 5.00 m/s^2. 3. Use the formula for distance traveled under constant acceleration: d = 0.5 * a * t^2, where d is the distance, a is the acceleration, and t is the time. 4. Substitute the given values into the formula: d = 0.5 * 5.00 m/s^2 * (7.000 s)^2 = 0....\n\n                  v26                          v25                                                   v24                                   v23                                                                                                                                v22                                                  v21       v20        v19      v18v17                                                                       v16         v15                                                                   v14                                                  v13   v12      v11  v10      v9  v8    v7       v6  v5       v4  v3        v2                                      v1               v0";
+  "v26" [label="v26\n15.00\n(t=5)"];
+  "v25" [label="v25\n75.00\n(t=15)"];
+  "v24" [label="v24\n7.000\n(t=30)"];
+  "v21" [label="v21\n75.00\n(t=90)"];
+  "v20" [label="v20\n15.00\n(t=98)"];
+  "v19" [label="v19\n5.00\n(t=106)"];
+  "v12" [label="v12\n5.00\n(t=171)"];
+  "v10" [label="v10\n7.000\n(t=183)"];
+  "v7" [label="v7\n5.00\n(t=195)"];
+  "v5" [label="v5\n49.000\n(t=207)"];
+  "v3" [label="v3\n122.50\n(t=217)"];
+  "v1" [label="v1\n7.000\n(t=239)"];
+  "v0" [label="v0\n122.50\n(t=246)"];
+  "v10" -> "v7" [label="0.718"];
+  "v1" -> "v0" [label="0.230"];
+  "v24" -> "v1" [label="0.019"];
+  "v7" -> "v5" [label="0.013"];
+  "v5" -> "v3" [label="0.009"];
+  "v21" -> "v10" [label="0.002"];
+  "v12" -> "v10" [label="0.001"];
+  "v20" -> "v12" [label="0.000"];
+}
