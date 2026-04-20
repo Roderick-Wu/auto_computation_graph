@@ -480,7 +480,12 @@ def main():
     parser.add_argument("--experiment", type=str, default="velocity", help="Experiment name.")
     parser.add_argument("--graph-dir", type=Path, default=None, help="Directory with graphs.")
     parser.add_argument("--output-json", type=Path, default=None, help="Output results.")
-    parser.add_argument("--max-pairs", type=int, default=5, help="Max pairs to test.")
+    parser.add_argument(
+        "--max-pairs",
+        type=int,
+        default=0,
+        help="Max pairs to test. Use 0 or a negative value to test all available graphs.",
+    )
     parser.add_argument("--max-skip-depths", type=int, default=3, help="Max depth of skips.")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size for generation.")
     parser.add_argument("--device", type=str, default="cuda", help="Device.")
@@ -503,7 +508,9 @@ def main():
     
     print(f"Loading graphs from: {graph_dir}")
     
-    pair_dirs = sorted([d for d in graph_dir.iterdir() if d.is_dir()])[:args.max_pairs]
+    pair_dirs = sorted([d for d in graph_dir.iterdir() if d.is_dir()])
+    if args.max_pairs > 0:
+        pair_dirs = pair_dirs[:args.max_pairs]
     pairs_json = graph_dir.parent / "aligned_pairs.json"
     aligned_pairs_dict = load_aligned_pairs_dict(pairs_json)
     

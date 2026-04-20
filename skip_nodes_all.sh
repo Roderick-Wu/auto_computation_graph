@@ -4,6 +4,7 @@
 set -euo pipefail
 
 MODEL_NAME="${1:-Qwen2.5-32B}"
+MAX_PAIRS="${2:-0}"
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
@@ -14,7 +15,7 @@ echo "Running node skipping tests for all experiments on $MODEL_NAME"
 
 while read -r experiment n_formats; do
     echo "===== $experiment ====="
-    sbatch skip_nodes.sh "$MODEL_NAME" "$experiment" "" 5
+    sbatch skip_nodes.sh "$MODEL_NAME" "$experiment" "" "$MAX_PAIRS"
 done < <(python list_all_experiments.py)
 
 echo "All node skipping tests complete."

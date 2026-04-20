@@ -43,6 +43,15 @@ def is_numeric_scalar(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def numeric_values_equal(a: Any, b: Any) -> bool:
+    """Numeric comparison that treats formatting differences (e.g., 3 vs 3.00) as equal."""
+    a_norm = normalize_number_string(a)
+    b_norm = normalize_number_string(b)
+    if a_norm is not None and b_norm is not None:
+        return a_norm == b_norm
+    return a == b
+
+
 def resolve_default_traces_json(model_name: str, experiment: str) -> Path:
     preferred = resolve_scratch_root() / "traces" / model_name / experiment / "reject_traces.json"
     if preferred.exists():
@@ -238,15 +247,7 @@ def build_counterfactual_metadata(
     original_prompt_metadata: Dict[str, Any],
     rng: random.Random,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """Sample a counterfactual tuple by reusing prompts.py generators for the same experiment/format."""
-    candidates = prompts.generate_prompts_for_experiment(prompt_experiment_name, samples_per_format=8)
-
-    filtered = [c for c in candidates if format_id is None or c.get("format_id") == format_id]
-    if not filtered:
-        filtered = candidates
-
-    chosen = rng.choice(filtered)
-
+    """Sample counterfactual metadata and prefer candidates where all sampled numeric keys differ."""
     core_keys = {
         "id",
         "prompt",
@@ -257,7 +258,80 @@ def build_counterfactual_metadata(
         "generated_text",
         "prompt_metadata",
     }
-    sampled_metadata = {k: v for k, v in chosen.items() if k not in core_keys}
+
+    def _extract_sampled_metadata(candidate: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: v for k, v in candidate.items() if k not in core_keys}
+
+    # Draw multiple candidate pools and try to find one where every sampled numeric
+    # key differs from the original prompt metadata. This avoids unlucky equal samples.
+    sampling_rounds = 8
+    samples_per_round = 32
+
+    chosen_sampled_metadata: Optional[Dict[str, Any]] = None
+    best_sampled_metadata: Optional[Dict[str, Any]] = None
+    best_changed_count = -1
+    best_comparable_count = -1
+    best_unchanged_keys: List[str] = []
+
+    for _ in range(sampling_rounds):
+        candidates = prompts.generate_prompts_for_experiment(
+            prompt_experiment_name,
+            samples_per_format=samples_per_round,
+        )
+
+        filtered = [c for c in candidates if format_id is None or c.get("format_id") == format_id]
+        if not filtered:
+            filtered = candidates
+        if not filtered:
+            continue
+
+        rng.shuffle(filtered)
+        fully_different_pool: List[Dict[str, Any]] = []
+
+        for candidate in filtered:
+            sampled_metadata = _extract_sampled_metadata(candidate)
+            comparable_keys: List[str] = []
+            changed_keys: List[str] = []
+
+            for key, sampled_value in sampled_metadata.items():
+                if key not in original_prompt_metadata:
+                    continue
+                original_value = original_prompt_metadata[key]
+                if not (is_numeric_scalar(sampled_value) and is_numeric_scalar(original_value)):
+                    continue
+                comparable_keys.append(key)
+                if not numeric_values_equal(original_value, sampled_value):
+                    changed_keys.append(key)
+
+            unchanged_keys = [k for k in comparable_keys if k not in changed_keys]
+
+            changed_count = len(changed_keys)
+            comparable_count = len(comparable_keys)
+            if (
+                changed_count > best_changed_count
+                or (changed_count == best_changed_count and comparable_count > best_comparable_count)
+            ):
+                best_sampled_metadata = sampled_metadata
+                best_changed_count = changed_count
+                best_comparable_count = comparable_count
+                best_unchanged_keys = unchanged_keys
+
+            if comparable_keys and not unchanged_keys:
+                fully_different_pool.append(sampled_metadata)
+
+        if fully_different_pool:
+            chosen_sampled_metadata = rng.choice(fully_different_pool)
+            break
+
+    if chosen_sampled_metadata is None:
+        chosen_sampled_metadata = best_sampled_metadata or {}
+        if best_unchanged_keys:
+            print(
+                "Warning: could not find fully-different counterfactual numeric metadata "
+                f"after {sampling_rounds} rounds (format_id={format_id}); unchanged keys: {best_unchanged_keys}"
+            )
+
+    sampled_metadata = chosen_sampled_metadata
 
     # Preserve all non-numeric fields from original metadata (e.g., object nouns).
     # Only numeric fields are counterfactually resampled.
@@ -271,10 +345,9 @@ def build_counterfactual_metadata(
         if key not in cf_metadata:
             continue
         new_value = cf_metadata[key]
-        if old_value == new_value:
-            continue
-
         if is_numeric_scalar(old_value) and is_numeric_scalar(new_value):
+            if numeric_values_equal(old_value, new_value):
+                continue
             replacements.append(
                 {
                     "key": key,
