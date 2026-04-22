@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Validate causal structure by intervening at token level.
 
-This script tests the causal assumptions in the graph by:
-1. Positive control: Corrupt direct parents of a value -> answer should change
-2. Negative control: Corrupt non-parents -> answer should remain unchanged
+This script tests local causal assumptions in the graph by:
+1. Positive control: Corrupt direct parents of a node -> node value should change
+2. Negative control: Corrupt non-parents of a node -> node value should remain unchanged
 
 Corruption methods:
 - False values: replace numeric values with incorrect ones
@@ -11,8 +11,8 @@ Corruption methods:
 - Counterfactuals: use values from counterfactual pairs when available
 
 Metrics aggregated across all tested values:
-- Hit rate: % of positive controls where answer changed (higher is better)
-- False alarm rate: % of negative controls where answer changed (lower is better)
+- Hit rate: % of positive controls where target node value changed (higher is better)
+- False alarm rate: % of negative controls where target node value changed (lower is better)
 - Specificity: how well the parents identify causal influence
 """
 
@@ -56,9 +56,14 @@ class InterventionResult:
     intervention_type: str                    # "positive_control" or "negative_control"
     corruption_method: str                    # "false_values", "masking", "counterfactual"
     corrupted_node_ids: List[str]            # which nodes were corrupted
-    baseline_answer: Optional[float]          # answer before intervention
-    intervened_answer: Optional[float]        # answer after intervention
-    answer_changed: bool                      # whether final answer changed
+    target_node_expected: Optional[float] = None   # target node's reference value from graph
+    baseline_node_value: Optional[float] = None    # node value from baseline continuation
+    intervened_node_value: Optional[float] = None  # node value from intervened continuation
+    node_value_changed: bool = False               # whether target node value changed
+    # Backward-compatible aliases populated with node-value scoring fields.
+    baseline_answer: Optional[float] = None
+    intervened_answer: Optional[float] = None
+    answer_changed: bool = False
     confidence: float = 0.0                   # model confidence estimate (if available)
     generation_length: int = 0                # tokens generated after truncation
     errors: List[str] = field(default_factory=list)  # any errors during intervention
@@ -70,8 +75,8 @@ class CausalMetrics:
     total_tests: int = 0
     positive_control_tests: int = 0
     negative_control_tests: int = 0
-    positive_hit_rate: float = 0.0            # % of positive controls with answer change
-    negative_false_alarm_rate: float = 0.0    # % of negative controls with answer change
+    positive_hit_rate: float = 0.0            # % of positive controls with target-node change
+    negative_false_alarm_rate: float = 0.0    # % of negative controls with target-node change
     specificity_score: float = 0.0            # (1 - false_alarm_rate)
     sensitivity_score: float = 0.0            # positive_hit_rate
     
@@ -142,10 +147,73 @@ def extract_answer_value(text: Optional[str]) -> Optional[float]:
     return extract_last_number_value(text)
 
 
+def extract_first_number_value(text: Optional[str]) -> Optional[float]:
+    """Extract the first numeric mention from text."""
+    if not text:
+        return None
+    match = NUMBER_PATTERN.search(text)
+    if not match:
+        return None
+    normalized = normalize_number_string(match.group(0))
+    return float(normalized) if normalized is not None else None
+
+
+def extract_continuation_text(full_text: str, prefix_text: str) -> str:
+    """Best-effort extraction of generated continuation after a prefix."""
+    if not full_text:
+        return ""
+    if prefix_text and full_text.startswith(prefix_text):
+        return full_text[len(prefix_text):]
+    # Fallback: anchor on a suffix from the prefix.
+    if prefix_text:
+        for window in (128, 64, 32):
+            if len(prefix_text) < window:
+                continue
+            suffix = prefix_text[-window:]
+            pos = full_text.rfind(suffix)
+            if pos >= 0:
+                return full_text[pos + window:]
+    return full_text
+
+
 def compute_relative_error(observed: float, expected: float) -> float:
     """Compute relative error between two values."""
     denominator = max(abs(expected), 1e-12)
     return abs(observed - expected) / denominator
+
+
+def values_differ(lhs: Optional[float], rhs: Optional[float], rel_tol: float = 1e-6) -> bool:
+    """Return whether two numeric values differ beyond tolerance."""
+    if lhs is None and rhs is None:
+        return False
+    if lhs is None or rhs is None:
+        return True
+    return compute_relative_error(lhs, rhs) > rel_tol
+
+
+def get_primary_numeric_text(value_texts: Any) -> Optional[str]:
+    """Return first numeric text candidate from a node's value_texts payload."""
+    if isinstance(value_texts, list):
+        for candidate in value_texts:
+            if candidate is None:
+                continue
+            value_text = str(candidate).strip()
+            if normalize_number_string(value_text) is not None:
+                return value_text
+    elif isinstance(value_texts, str):
+        value_text = value_texts.strip()
+        if normalize_number_string(value_text) is not None:
+            return value_text
+    return None
+
+
+def get_node_numeric_value(node: Dict[str, Any]) -> Optional[float]:
+    """Return normalized numeric value for a graph node if available."""
+    value_text = get_primary_numeric_text(node.get("value_texts"))
+    if value_text is None:
+        return None
+    normalized = normalize_number_string(value_text)
+    return float(normalized) if normalized is not None else None
 
 
 def extract_numeric_spans(text: Optional[str]) -> List[Tuple[int, int, str]]:
@@ -309,7 +377,7 @@ def generate_from_truncation(
     model: Any,
     tokenizer: Any,
     truncated_text: str,
-    max_new_tokens: int = 50,
+    max_new_tokens: int = 30,
     temperature: float = 1.0,
 ) -> Tuple[str, int]:
     """Generate continuation from truncated text.
@@ -320,15 +388,17 @@ def generate_from_truncation(
         # Tokenize truncated text
         encoded = tokenizer(truncated_text, return_tensors="pt")
         input_ids = encoded["input_ids"].to(model.device)
+        attention_mask = encoded.get("attention_mask")
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(model.device)
         
         # Generate
         with torch.inference_mode():
             outputs = model.generate(
                 input_ids,
+                attention_mask=attention_mask,
                 max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                top_p=0.95,
-                do_sample=True,
+                do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
             )
         
@@ -344,7 +414,7 @@ def generate_batch(
     model: Any,
     tokenizer: Any,
     truncated_texts: List[str],
-    max_new_tokens: int = 50,
+    max_new_tokens: int = 30,
     temperature: float = 1.0,
 ) -> List[Tuple[str, int]]:
     """Generate continuations for a batch of truncated texts in parallel.
@@ -375,9 +445,7 @@ def generate_batch(
                 input_ids,
                 attention_mask=attention_mask,
                 max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                top_p=0.95,
-                do_sample=True,
+                do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
             )
         
@@ -506,18 +574,18 @@ def run_validation_on_pair(
     aligned_pairs_dict: Dict[str, Dict],
     max_tests_per_pair: int = 10,
     batch_size: int = 8,
+    max_new_tokens: int = 30,
 ) -> List[InterventionResult]:
-    """Run validation tests on a single pair with batched generation."""
-    
-    results = []
-    trace_text = None
-    
+    """Run node-local parent vs non-parent validation on a single pair."""
+
+    results: List[InterventionResult] = []
+
     # Load graph.json from the pair directory itself.
     graph_path = pair_path / "graph.json"
     graph = load_graph_json(graph_path)
     if not graph:
         return results
-    
+
     pair_lookup_keys = [str(pair_id)]
     if str(pair_id).startswith("pair"):
         pair_lookup_keys.append(str(pair_id)[4:])
@@ -529,57 +597,78 @@ def run_validation_on_pair(
             break
     if not pair:
         return results
-    
+
     trace_text = get_pair_trace_text(pair)
     if not trace_text:
         return results
-    
+
     node_stats = graph.get("node_stats", {})
     nodes = {n["id"]: n for n in graph.get("nodes", [])}
-    
-    # Build parent/child relationships
+
+    def trunc_idx_for(node_id: str) -> int:
+        return int(node_stats.get(node_id, {}).get("truncation_token_index", -1))
+
+    # Build parent/child relationships.
     edges = graph.get("edges", [])
     parents_of = defaultdict(set)  # child -> set of parents
-    children_of = defaultdict(set)  # parent -> set of children
-    
     for edge in edges:
         src, dst = edge["source"], edge["target"]
         parents_of[dst].add(src)
-        children_of[src].add(dst)
-    
+
     # Test only connected nodes with parents. Disconnected nodes are graph-construction noise.
     connected_nodes = {edge["source"] for edge in edges} | {edge["target"] for edge in edges}
     all_nodes = [n for n in nodes.keys() if n != "prompt" and n in connected_nodes]
-    all_nodes.sort(key=lambda n: int(node_stats.get(n, {}).get("truncation_token_index", -1)), reverse=True)
+    all_nodes.sort(key=trunc_idx_for, reverse=True)
     test_nodes = [n for n in all_nodes if len(parents_of.get(n, set())) > 0]
     if len(test_nodes) > 5:
         test_nodes = test_nodes[:5]
-    
-    # Batch up all tests to run in parallel
-    pending_tests: List[Tuple[InterventionResult, str, List[str], str]] = []  # (result_obj, truncated_text, corrupted_node_ids, control_type)
-    
+
+    # Batch tests: (result_obj, truncated_text, corrupted_node_ids)
+    pending_tests: List[Tuple[InterventionResult, str, List[str]]] = []
+
     for value_node_id in test_nodes:
-        if len(results) >= max_tests_per_pair:
+        if len(results) + len(pending_tests) >= max_tests_per_pair:
             break
-            
-        node_parents = list(parents_of.get(value_node_id, set()))
-        all_other_nodes = [n for n in nodes.keys() if n != value_node_id and n not in node_parents]
-        
-        if not node_parents:
-            continue  # Skip nodes with no parents
-        
-        # Positive control: corrupt parents
-        for corruption_method in ["false_values", "masking"]:
+
+        trunc_idx = trunc_idx_for(value_node_id)
+        if trunc_idx < 0:
+            continue
+        truncated_text = truncate_after_first_question(trace_text, trunc_idx)
+
+        # Candidate controllable nodes must be in the observed prefix.
+        prefix_candidates = [
+            node_id
+            for node_id in nodes.keys()
+            if node_id != value_node_id and 0 <= trunc_idx_for(node_id) < trunc_idx
+        ]
+        prefix_candidates.sort(key=trunc_idx_for, reverse=True)
+
+        parent_ids = [node_id for node_id in prefix_candidates if node_id in parents_of.get(value_node_id, set())]
+        parent_set = set(parent_ids)
+        non_parent_ids = [node_id for node_id in prefix_candidates if node_id not in parent_set]
+
+        def filter_corruptible(node_ids: List[str]) -> List[str]:
+            out: List[str] = []
+            for node_id in node_ids:
+                value_text = get_primary_numeric_text(nodes.get(node_id, {}).get("value_texts"))
+                if value_text and truncated_text.find(value_text) >= 0:
+                    out.append(node_id)
+            return out
+
+        corruptible_parents = filter_corruptible(parent_ids)
+        corruptible_non_parents = filter_corruptible(non_parent_ids)
+        if not corruptible_parents:
+            continue
+
+        target_expected = get_node_numeric_value(nodes.get(value_node_id, {}))
+
+        # Positive control: corrupt direct parents of the target node.
+        for corruption_method in ["false_values"]:
             if len(results) + len(pending_tests) >= max_tests_per_pair:
                 break
-            
-            corrupted_node_ids = node_parents[:min(2, len(node_parents))]
-            trunc_idx = node_stats.get(value_node_id, {}).get("truncation_token_index", -1)
-            if trunc_idx < 0:
+            corrupted_node_ids = corruptible_parents[: min(2, len(corruptible_parents))]
+            if not corrupted_node_ids:
                 continue
-            
-            truncated_text = truncate_after_first_question(trace_text, trunc_idx)
-            
             test_id = f"{pair_id}_{value_node_id}_positive_{corruption_method}_{len(corrupted_node_ids)}"
             result = InterventionResult(
                 test_id=test_id,
@@ -589,87 +678,90 @@ def run_validation_on_pair(
                 intervention_type="positive_control",
                 corruption_method=corruption_method,
                 corrupted_node_ids=corrupted_node_ids,
-                baseline_answer=None,
-                intervened_answer=None,
-                answer_changed=False,
+                target_node_expected=target_expected,
             )
-            pending_tests.append((result, truncated_text, corrupted_node_ids, "positive"))
-        
-        # Negative control: corrupt non-parents
-        if all_other_nodes:
-            for corruption_method in ["false_values"]:
-                if len(results) + len(pending_tests) >= max_tests_per_pair:
-                    break
-                
-                non_parents = all_other_nodes[:min(2, len(all_other_nodes))]
-                trunc_idx = node_stats.get(value_node_id, {}).get("truncation_token_index", -1)
-                if trunc_idx < 0:
-                    continue
-                
-                truncated_text = truncate_after_first_question(trace_text, trunc_idx)
-                
-                test_id = f"{pair_id}_{value_node_id}_negative_{corruption_method}_{len(non_parents)}"
-                result = InterventionResult(
-                    test_id=test_id,
-                    pair_id=pair_id,
-                    value_node_id=value_node_id,
-                    truncation_token_idx=trunc_idx,
-                    intervention_type="negative_control",
-                    corruption_method=corruption_method,
-                    corrupted_node_ids=non_parents,
-                    baseline_answer=None,
-                    intervened_answer=None,
-                    answer_changed=False,
-                )
-                pending_tests.append((result, truncated_text, non_parents, "negative"))
-    
-    # Process pending tests in batches
+            pending_tests.append((result, truncated_text, corrupted_node_ids))
+
+        # Negative control: corrupt non-parents of the target node.
+        for corruption_method in ["false_values"]:
+            if len(results) + len(pending_tests) >= max_tests_per_pair:
+                break
+            corrupted_node_ids = corruptible_non_parents[: min(2, len(corruptible_non_parents))]
+            if not corrupted_node_ids:
+                continue
+            test_id = f"{pair_id}_{value_node_id}_negative_{corruption_method}_{len(corrupted_node_ids)}"
+            result = InterventionResult(
+                test_id=test_id,
+                pair_id=pair_id,
+                value_node_id=value_node_id,
+                truncation_token_idx=trunc_idx,
+                intervention_type="negative_control",
+                corruption_method=corruption_method,
+                corrupted_node_ids=corrupted_node_ids,
+                target_node_expected=target_expected,
+            )
+            pending_tests.append((result, truncated_text, corrupted_node_ids))
+
+    # Process pending tests in batches.
     for batch_start in range(0, len(pending_tests), batch_size):
         batch_end = min(batch_start + batch_size, len(pending_tests))
         batch = pending_tests[batch_start:batch_end]
-        
-        # Generate baselines for this batch
-        baseline_texts = [truncated for (_, truncated, _, _) in batch]
-        baselines = generate_batch(model, tokenizer, baseline_texts, max_new_tokens=50)
-        
-        # Generate intervened versions
-        intervened_texts = []
-        for (result_obj, truncated, corrupted_node_ids, _) in batch:
+
+        # Generate baselines for this batch.
+        baseline_texts = [truncated for (_, truncated, _) in batch]
+        baselines = generate_batch(model, tokenizer, baseline_texts, max_new_tokens=max_new_tokens)
+
+        # Generate intervened versions.
+        intervened_texts: List[str] = []
+        for (result_obj, truncated, corrupted_node_ids) in batch:
             corrupted_text = truncated
             for corrupt_node_id in corrupted_node_ids:
-                node_value_texts = [n.get("value_texts", []) for n in graph["nodes"] if n.get("id") == corrupt_node_id]
-                if node_value_texts and node_value_texts[0]:
-                    value_text = node_value_texts[0][0]
-                    char_start = corrupted_text.find(value_text)
-                    if char_start >= 0:
-                        char_end = char_start + len(value_text)
-                        corrupted_text = corrupt_node_in_trace(
-                            corrupted_text, corrupt_node_id, value_text,
-                            (char_start, char_end), 
-                            result_obj.corruption_method,
-                        )
+                value_text = get_primary_numeric_text(nodes.get(corrupt_node_id, {}).get("value_texts"))
+                if not value_text:
+                    continue
+                char_start = corrupted_text.find(value_text)
+                if char_start < 0:
+                    continue
+                char_end = char_start + len(value_text)
+                corrupted_text = corrupt_node_in_trace(
+                    corrupted_text,
+                    corrupt_node_id,
+                    value_text,
+                    (char_start, char_end),
+                    result_obj.corruption_method,
+                )
             intervened_texts.append(corrupted_text)
-        
-        intervened = generate_batch(model, tokenizer, intervened_texts, max_new_tokens=50)
-        
-        # Update results
-        for i, (result, truncated, corrupted_node_ids, control_type) in enumerate(batch):
-            baseline_text, baseline_len = baselines[i]
+
+        intervened = generate_batch(model, tokenizer, intervened_texts, max_new_tokens=max_new_tokens)
+
+        # Score local node change: compare the first generated numeric value after truncation.
+        for i, (result, truncated, _) in enumerate(batch):
+            baseline_text, _baseline_len = baselines[i]
             intervened_text, intervened_len = intervened[i]
-            
-            baseline_answer = extract_answer_value(baseline_text)
-            intervened_answer = extract_answer_value(intervened_text)
-            
-            result.baseline_answer = baseline_answer
-            result.intervened_answer = intervened_answer
+
+            baseline_cont = extract_continuation_text(baseline_text, truncated)
+            intervened_cont = extract_continuation_text(intervened_text, truncated)
+
+            baseline_node_value = extract_first_number_value(baseline_cont)
+            intervened_node_value = extract_first_number_value(intervened_cont)
+
+            if baseline_node_value is None:
+                result.errors.append("Could not extract baseline target-node value from continuation.")
+            if intervened_node_value is None:
+                result.errors.append("Could not extract intervened target-node value from continuation.")
+
+            result.baseline_node_value = baseline_node_value
+            result.intervened_node_value = intervened_node_value
+            result.node_value_changed = values_differ(baseline_node_value, intervened_node_value)
             result.generation_length = intervened_len
-            
-            if baseline_answer is not None and intervened_answer is not None:
-                error = compute_relative_error(intervened_answer, baseline_answer)
-                result.answer_changed = error > 0.05
-            
+
+            # Backward-compatible fields.
+            result.baseline_answer = baseline_node_value
+            result.intervened_answer = intervened_node_value
+            result.answer_changed = result.node_value_changed
+
             results.append(result)
-    
+
     return results
 
 
@@ -686,14 +778,14 @@ def aggregate_metrics(results: List[InterventionResult]) -> CausalMetrics:
     metrics.positive_control_tests = len(positive_controls)
     metrics.negative_control_tests = len(negative_controls)
     
-    # Hit rate: % of positive controls where answer changed
+    # Hit rate: % of positive controls where target node value changed.
     if positive_controls:
-        changed = sum(1 for r in positive_controls if r.answer_changed)
+        changed = sum(1 for r in positive_controls if r.node_value_changed)
         metrics.positive_hit_rate = changed / len(positive_controls)
     
-    # False alarm rate: % of negative controls where answer changed
+    # False alarm rate: % of negative controls where target node value changed.
     if negative_controls:
-        changed = sum(1 for r in negative_controls if r.answer_changed)
+        changed = sum(1 for r in negative_controls if r.node_value_changed)
         metrics.negative_false_alarm_rate = changed / len(negative_controls)
     
     metrics.sensitivity_score = metrics.positive_hit_rate
@@ -704,7 +796,7 @@ def aggregate_metrics(results: List[InterventionResult]) -> CausalMetrics:
         tests_with_method = [r for r in positive_controls if r.corruption_method == method]
         if tests_with_method:
             metrics.tests_by_method[method] = len(tests_with_method)
-            hit_rate = sum(1 for r in tests_with_method if r.answer_changed) / len(tests_with_method)
+            hit_rate = sum(1 for r in tests_with_method if r.node_value_changed) / len(tests_with_method)
             metrics.hit_rate_by_method[method] = hit_rate
     
     return metrics
@@ -725,6 +817,7 @@ def main():
         help="Max pairs to test. Use 0 or a negative value to test all available graphs.",
     )
     parser.add_argument("--max-tests-per-pair", type=int, default=10, help="Max tests per pair.")
+    parser.add_argument("--max-new-tokens", type=int, default=30, help="Tokens to generate after truncation.")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size for generation.")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu).")
     parser.add_argument("--dtype", type=str, default="float16", help="Model dtype (float32 or float16).")
@@ -779,6 +872,7 @@ def main():
             aligned_pairs_dict,
             max_tests_per_pair=args.max_tests_per_pair,
             batch_size=args.batch_size,
+            max_new_tokens=args.max_new_tokens,
         )
         all_results.extend(results)
         print(f"  {len(results)} tests completed")
@@ -801,8 +895,8 @@ def main():
     
     print(f"\nResults saved to: {output_json}")
     print(f"Total tests: {metrics.total_tests}")
-    print(f"Positive control hit rate: {metrics.positive_hit_rate:.2%}")
-    print(f"Negative control false alarm rate: {metrics.negative_false_alarm_rate:.2%}")
+    print(f"Positive control hit rate (target-node changed): {metrics.positive_hit_rate:.2%}")
+    print(f"Negative control false alarm rate (target-node changed): {metrics.negative_false_alarm_rate:.2%}")
     print(f"Sensitivity: {metrics.sensitivity_score:.2%}, Specificity: {metrics.specificity_score:.2%}")
 
 
