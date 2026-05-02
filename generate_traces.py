@@ -77,7 +77,17 @@ print()
 
 print("Loading model...")
 print("Loading tokenizer...")
-tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+try:
+    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+except Exception as e:
+    # Gemma tokenizers can fail on some transformers builds when
+    # tokenizer_config has list-valued extra_special_tokens.
+    print(f"Default tokenizer load failed ({type(e).__name__}: {e}). Retrying with extra_special_tokens={{}}...")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(args.model_path, extra_special_tokens={})
+    except Exception as e2:
+        print(f"Retry with extra_special_tokens={{}} failed ({type(e2).__name__}: {e2}). Retrying with use_fast=False...")
+        tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=False)
 
 print("Loading HuggingFace model with device_map='auto'...")
 model = AutoModelForCausalLM.from_pretrained(
@@ -91,7 +101,19 @@ if tokenizer.pad_token_id is None:
     tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'left'
 
-print(f"Model loaded: {model.config.num_hidden_layers} layers, {model.config.hidden_size} dimensions\n")
+cfg = model.config
+text_cfg = getattr(cfg, "text_config", None)
+num_layers = getattr(cfg, "num_hidden_layers", None)
+hidden_size = getattr(cfg, "hidden_size", None)
+if num_layers is None and text_cfg is not None:
+    num_layers = getattr(text_cfg, "num_hidden_layers", None)
+if hidden_size is None and text_cfg is not None:
+    hidden_size = getattr(text_cfg, "hidden_size", None)
+
+if num_layers is not None and hidden_size is not None:
+    print(f"Model loaded: {num_layers} layers, {hidden_size} dimensions\n")
+else:
+    print(f"Model loaded: config={type(cfg).__name__} (layers/hidden_size unavailable)\n")
 
 # ==========================================
 # PROMPT GENERATION

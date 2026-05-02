@@ -18,6 +18,7 @@ Metrics aggregated across all tested values:
 
 import argparse
 import json
+import random
 import re
 import sys
 from collections import defaultdict
@@ -274,9 +275,12 @@ def corrupt_node_in_trace(
     value_token_range: Tuple[int, int],  # (start_char, end_char)
     corruption_method: str,
     replacement_value: Optional[str] = None,
+    false_value_mode: str = "deterministic",
+    rng: Optional[random.Random] = None,
 ) -> str:
     """Corrupt a single node's value occurrence in the trace."""
     start_char, end_char = value_token_range
+    local_rng = rng or random
     
     if corruption_method == "false_values":
         # Replace with a plausible but incorrect number
@@ -284,8 +288,17 @@ def corrupt_node_in_trace(
             # Try to generate a false value based on the original
             try:
                 orig_val = float(normalize_number_string(value_text))
-                # Multiply by 2 or add noise
-                false_val = orig_val * 2.0 + 0.5
+                if false_value_mode == "random":
+                    # Random-but-plausible perturbation.
+                    sign = -1.0 if local_rng.random() < 0.5 else 1.0
+                    scale = max(abs(orig_val), 1.0)
+                    jitter = local_rng.uniform(0.25, 2.0) * scale
+                    false_val = orig_val + sign * jitter
+                    if abs(false_val - orig_val) < 1e-9:
+                        false_val = orig_val + sign * max(1.0, 0.1 * scale)
+                else:
+                    # Deterministic baseline used in prior sweeps.
+                    false_val = orig_val * 2.0 + 0.5
                 replacement_value = str(false_val)
             except:
                 replacement_value = "0.0"
@@ -575,10 +588,15 @@ def run_validation_on_pair(
     max_tests_per_pair: int = 10,
     batch_size: int = 8,
     max_new_tokens: int = 30,
+    corruption_methods: Optional[List[str]] = None,
+    false_value_mode: str = "deterministic",
+    rng: Optional[random.Random] = None,
 ) -> List[InterventionResult]:
     """Run node-local parent vs non-parent validation on a single pair."""
 
     results: List[InterventionResult] = []
+    if corruption_methods is None:
+        corruption_methods = ["false_values"]
 
     # Load graph.json from the pair directory itself.
     graph_path = pair_path / "graph.json"
@@ -605,8 +623,84 @@ def run_validation_on_pair(
     node_stats = graph.get("node_stats", {})
     nodes = {n["id"]: n for n in graph.get("nodes", [])}
 
+    nested_pair = pair.get("pair", {}) if isinstance(pair.get("pair"), dict) else {}
+    nested_source = nested_pair.get("source", {}) if isinstance(nested_pair.get("source"), dict) else {}
+    source_values = nested_source.get("values", []) if isinstance(nested_source.get("values"), list) else []
+    # Graph value indices are reversed from source value order: v0 is the last source value.
+    graph_value_to_source_value: Dict[int, Dict[str, Any]] = {}
+    for graph_vidx, value_obj in enumerate(reversed(source_values)):
+        if isinstance(value_obj, dict):
+            graph_value_to_source_value[graph_vidx] = value_obj
+
     def trunc_idx_for(node_id: str) -> int:
         return int(node_stats.get(node_id, {}).get("truncation_token_index", -1))
+
+    def get_node_occurrences_before_trunc(
+        node_id: str,
+        trunc_idx: int,
+        truncated_text: str,
+    ) -> List[Tuple[int, int, str]]:
+        """Return exact occurrences (char spans) for a node before truncation.
+
+        Prefers span/token metadata from aligned pair values; falls back to string search.
+        """
+        node = nodes.get(node_id, {})
+        if not isinstance(node, dict):
+            return []
+
+        occurrences: List[Tuple[int, int, str]] = []
+        value_indices = node.get("value_indices", []) if isinstance(node.get("value_indices", []), list) else []
+
+        for idx in value_indices:
+            try:
+                graph_vidx = int(idx)
+            except Exception:
+                continue
+            value_obj = graph_value_to_source_value.get(graph_vidx)
+            if not isinstance(value_obj, dict):
+                continue
+
+            token_end = value_obj.get("token_end")
+            if isinstance(token_end, int) and token_end > trunc_idx:
+                continue
+
+            span_start = value_obj.get("span_start")
+            span_end = value_obj.get("span_end")
+            if not (isinstance(span_start, int) and isinstance(span_end, int)):
+                continue
+            if span_start < 0 or span_end <= span_start:
+                continue
+            if span_end > len(truncated_text):
+                continue
+
+            # Use exact span from trace text to avoid ambiguity with repeated numbers.
+            span_text = truncated_text[span_start:span_end]
+            if normalize_number_string(span_text) is None:
+                value_text = str(value_obj.get("value_text", "")).strip()
+                if normalize_number_string(value_text) is None:
+                    continue
+                span_text = value_text
+            occurrences.append((span_start, span_end, span_text))
+
+        if occurrences:
+            dedup: List[Tuple[int, int, str]] = []
+            seen: Set[Tuple[int, int]] = set()
+            for start, end, text_val in sorted(occurrences, key=lambda x: (x[0], x[1])):
+                key = (start, end)
+                if key in seen:
+                    continue
+                seen.add(key)
+                dedup.append((start, end, text_val))
+            return dedup
+
+        # Fallback: use rightmost string match so we don't always hit early repeats.
+        value_text = get_primary_numeric_text(node.get("value_texts"))
+        if not value_text:
+            return []
+        pos = truncated_text.rfind(value_text)
+        if pos < 0:
+            return []
+        return [(pos, pos + len(value_text), value_text)]
 
     # Build parent/child relationships.
     edges = graph.get("edges", [])
@@ -650,8 +744,7 @@ def run_validation_on_pair(
         def filter_corruptible(node_ids: List[str]) -> List[str]:
             out: List[str] = []
             for node_id in node_ids:
-                value_text = get_primary_numeric_text(nodes.get(node_id, {}).get("value_texts"))
-                if value_text and truncated_text.find(value_text) >= 0:
+                if get_node_occurrences_before_trunc(node_id, trunc_idx, truncated_text):
                     out.append(node_id)
             return out
 
@@ -663,7 +756,7 @@ def run_validation_on_pair(
         target_expected = get_node_numeric_value(nodes.get(value_node_id, {}))
 
         # Positive control: corrupt direct parents of the target node.
-        for corruption_method in ["false_values"]:
+        for corruption_method in corruption_methods:
             if len(results) + len(pending_tests) >= max_tests_per_pair:
                 break
             corrupted_node_ids = corruptible_parents[: min(2, len(corruptible_parents))]
@@ -683,7 +776,7 @@ def run_validation_on_pair(
             pending_tests.append((result, truncated_text, corrupted_node_ids))
 
         # Negative control: corrupt non-parents of the target node.
-        for corruption_method in ["false_values"]:
+        for corruption_method in corruption_methods:
             if len(results) + len(pending_tests) >= max_tests_per_pair:
                 break
             corrupted_node_ids = corruptible_non_parents[: min(2, len(corruptible_non_parents))]
@@ -714,21 +807,35 @@ def run_validation_on_pair(
         # Generate intervened versions.
         intervened_texts: List[str] = []
         for (result_obj, truncated, corrupted_node_ids) in batch:
-            corrupted_text = truncated
+            trunc_idx = result_obj.truncation_token_idx
+            replacements: List[Tuple[int, int, str, str]] = []
             for corrupt_node_id in corrupted_node_ids:
-                value_text = get_primary_numeric_text(nodes.get(corrupt_node_id, {}).get("value_texts"))
-                if not value_text:
+                occs = get_node_occurrences_before_trunc(corrupt_node_id, trunc_idx, truncated)
+                if not occs:
                     continue
-                char_start = corrupted_text.find(value_text)
-                if char_start < 0:
+                # Use the latest exact occurrence for this node before truncation.
+                start, end, value_text = occs[-1]
+                replacements.append((start, end, value_text, corrupt_node_id))
+
+            # Apply from right to left so earlier spans stay valid after replacements.
+            replacements.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            corrupted_text = truncated
+            for char_start, char_end, value_text, corrupt_node_id in replacements:
+                if not (0 <= char_start < char_end <= len(corrupted_text)):
                     continue
-                char_end = char_start + len(value_text)
+                current_span_text = corrupted_text[char_start:char_end]
+                if normalize_number_string(current_span_text) is not None:
+                    value_for_corruption = current_span_text
+                else:
+                    value_for_corruption = value_text
                 corrupted_text = corrupt_node_in_trace(
                     corrupted_text,
                     corrupt_node_id,
-                    value_text,
+                    value_for_corruption,
                     (char_start, char_end),
                     result_obj.corruption_method,
+                    false_value_mode=false_value_mode,
+                    rng=rng,
                 )
             intervened_texts.append(corrupted_text)
 
@@ -792,10 +899,11 @@ def aggregate_metrics(results: List[InterventionResult]) -> CausalMetrics:
     metrics.specificity_score = 1.0 - metrics.negative_false_alarm_rate
     
     # Metrics by corruption method
-    for method in ["false_values", "masking", "counterfactual"]:
+    method_names = sorted({r.corruption_method for r in positive_controls})
+    for method in method_names:
         tests_with_method = [r for r in positive_controls if r.corruption_method == method]
+        metrics.tests_by_method[method] = len(tests_with_method)
         if tests_with_method:
-            metrics.tests_by_method[method] = len(tests_with_method)
             hit_rate = sum(1 for r in tests_with_method if r.node_value_changed) / len(tests_with_method)
             metrics.hit_rate_by_method[method] = hit_rate
     
@@ -819,10 +927,33 @@ def main():
     parser.add_argument("--max-tests-per-pair", type=int, default=10, help="Max tests per pair.")
     parser.add_argument("--max-new-tokens", type=int, default=30, help="Tokens to generate after truncation.")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size for generation.")
+    parser.add_argument(
+        "--corruption-methods",
+        type=str,
+        default="false_values",
+        help="Comma-separated methods from {false_values,masking,counterfactual}.",
+    )
+    parser.add_argument(
+        "--false-value-mode",
+        type=str,
+        default="deterministic",
+        choices=["deterministic", "random"],
+        help="How false_values replacements are generated.",
+    )
+    parser.add_argument("--random-seed", type=int, default=123, help="Seed used when false-value-mode=random.")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda or cpu).")
     parser.add_argument("--dtype", type=str, default="float16", help="Model dtype (float32 or float16).")
     
     args = parser.parse_args()
+
+    allowed_methods = {"false_values", "masking", "counterfactual"}
+    corruption_methods = [m.strip() for m in args.corruption_methods.split(",") if m.strip()]
+    if not corruption_methods:
+        raise ValueError("No corruption methods provided.")
+    unknown_methods = [m for m in corruption_methods if m not in allowed_methods]
+    if unknown_methods:
+        raise ValueError(f"Unknown corruption methods: {unknown_methods}. Allowed: {sorted(allowed_methods)}")
+    rng = random.Random(args.random_seed)
     
     model_path = resolve_default_model_path(args.model_name)
     graph_dir = args.graph_dir or resolve_default_graph_dir(args.model_name, args.experiment)
@@ -844,6 +975,11 @@ def main():
     tokenizer.padding_side = "left"
     
     print(f"Loading graphs from: {graph_dir}")
+    print(
+        "Validation config: "
+        f"methods={corruption_methods} false_value_mode={args.false_value_mode} "
+        f"max_tests_per_pair={args.max_tests_per_pair}"
+    )
     
     # Find all patch run directories
     pair_dirs = sorted([d for d in graph_dir.iterdir() if d.is_dir()])
@@ -873,6 +1009,9 @@ def main():
             max_tests_per_pair=args.max_tests_per_pair,
             batch_size=args.batch_size,
             max_new_tokens=args.max_new_tokens,
+            corruption_methods=corruption_methods,
+            false_value_mode=args.false_value_mode,
+            rng=rng,
         )
         all_results.extend(results)
         print(f"  {len(results)} tests completed")
