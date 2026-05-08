@@ -21,7 +21,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, request
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv() -> bool:
+        return False
 from transformers import AutoTokenizer
 
 import prompts

@@ -1,161 +1,151 @@
 # auto_computation_graph
 
-This directory implements the trace-generation and causal-patching pipeline for the hidden-variable experiments.
+This directory contains the full counterfactual-patching pipeline for building value-level causal graphs from reasoning traces, plus API-based "ground-truth" graph generation and quantitative graph evaluation.
 
-## Pipeline
+## Current default pipeline (pair-only)
 
-1. Generate CoT traces with [generate_traces.py](generate_traces.py).
-   - Sample questions across all prompt formats.
-   - Save the raw traces to `traces.json`.
+The active flow is the **counterfactual pair** variant:
 
-2. Validate the traces with [reject_traces.py](reject_traces.py).
-   - Truncate runaway continuations so only the first trace segment is inspected.
-   - Reject traces whose final answer is missing or outside tolerance.
-   - Save the accepted traces to `reject_traces.json`.
+1. Generate traces (`traces.json`)  
+   Script: `generate_traces.py` (wrapper: `generate.sh`, sweep: `generate_all.sh`)
+2. Reject malformed/incorrect traces (`reject_traces.json`)  
+   Script: `reject_traces.py` (wrapper: `reject_traces.sh`, sweep: `reject_traces_all.sh`)
+3. Generate counterfactual pairs (`paired_traces.json`)  
+   Script: `intervene_generate_pairs.py` (wrapper: `generate_pairs.sh`, sweep: `generate_pairs_all.sh`)
+4. Post-process / token-align pairs (`aligned_pairs.json`)  
+   Script: `post_process_pairs.py` (wrapper: `post_process.sh`, sweep: `post_process_all.sh`)
+5. Run token-level counterfactual patching (`patch_runs/`)  
+   Script: `intervene_graph.py` (wrapper: `patch_graph.sh`, sweep: `patch_graph_all.sh`)
+6. Construct candidate causal graphs (`graphs/`)  
+   Script: `construct_graph.py` (wrapper: `construct_graph.sh`, sweep: `construct_graph_all.sh`)
+7. Generate API-based ground-truth graphs (`graphs_ground_truth_api/`)  
+   Script: `generate_ground_truth_graphs_api.py` (wrappers: `generate_ground_truth_graphs_api.sh`, `run_gt_qwen_all.sh`)
+8. Evaluate candidate graphs vs ground-truth graphs  
+   Script: `evaluate_graphs_against_ground_truth.py`
 
-3. Run counterfactual patching.
-   - [intervene_generate_pairs.py](intervene_generate_pairs.py) creates counterfactual pairs.
-   - [post_process_pairs.py](post_process_pairs.py) aligns token lengths.
-   - [intervene_graph.py](intervene_graph.py) performs token-level causal patching.
+## Where each stage should run
 
-4. Build graphs from the patching matrices with [construct_graph.py](construct_graph.py).
-   - The output is a value-level causal graph built from the difference matrices.
+- **GPU Slurm job**:
+  - `generate.sh`
+  - `patch_graph.sh`
+- **CPU/local (login node preferred)**:
+  - `reject_traces.sh` / `reject_traces_all.sh` (can be local or Slurm)
+  - `post_process.sh` / `post_process_all.sh`
+  - `construct_graph.sh` / `construct_graph_all.sh`
+  - `evaluate_graphs_against_ground_truth.py`
+- **Login node only (needs outbound internet/API)**:
+  - `generate_pairs.sh` / `generate_pairs_all.sh`
+  - `generate_ground_truth_graphs_api.py` / `generate_ground_truth_graphs_api.sh` / `run_gt_qwen_all.sh`
 
-5. Build API-based ground-truth graphs.
-   - [generate_ground_truth_graphs_api.py](generate_ground_truth_graphs_api.py) creates a value graph from prompt + labeled CoT via API calls.
-   - Wrapper for a single experiment: `bash generate_ground_truth_graphs_api.sh <model> <experiment>`.
-   - Wrapper for all Qwen experiments: `bash run_gt_qwen_all.sh`.
-   - Ground-truth generation must run on a login node (compute nodes do not have outbound API access).
-
-6. Evaluate candidate patching graphs against API ground truth.
-   - [evaluate_graphs_against_ground_truth.py](evaluate_graphs_against_ground_truth.py) compares `graphs/` against `graphs_ground_truth_api/`.
-   - Reports direct-edge and transitive-closure metrics per pair, per experiment, and overall.
-
-7. Validate the causal structure with token-level intervention tests.
-   - [intervene_validate_causal_structure.py](intervene_validate_causal_structure.py) tests if corrupting parent nodes changes answers (positive control) and if corrupting non-parents leaves answers unchanged (negative control).
-   - Outputs: causal sensitivity metrics (hit rate, false alarm rate, specificity).
-   - Corruption methods: false values, masking ([REDACTED]), counterfactual substitution.
-   - Run single experiment: `bash validate_causal_structure.sh <model> <experiment>`.
-   - Run all experiments: `bash validate_causal_structure_all.sh <model>`.
-
-8. Test node necessity with node-skipping experiments.
-   - [intervene_skip_nodes.py](intervene_skip_nodes.py) tests whether the model can still generate correct answers when intermediate values are truncated.
-   - Progressively skips ancestors of the final answer and forces generation at different truncation points.
-   - Outputs: node necessity metrics (which nodes can be bypassed, robustness score).
-   - Run single experiment: `bash skip_nodes.sh <model> <experiment>`.
-   - Run all experiments: `bash skip_nodes_all.sh <model>`.
-
-## Outputs
-
-- `traces.json` from generation
-- `reject_traces.json` from validation/rejection (accepted traces)
-- `paired_traces.json` from counterfactual pairing
-- `patch_runs/` from pairwise activation patching
-- `graphs/` from graph construction
-- `graphs_ground_truth_api/` from API-based ground-truth graph generation
-- `graph_eval_*/` (under `smoke_logs/`) from candidate-vs-ground-truth evaluation
-- `causal_validation_results.json` from token-level intervention tests
-- `node_skipping_results.json` from node necessity tests
-
-## Notes
-
-- The nopair/noise patching branch is intentionally omitted from this README because it is still work in progress.
-- Gemma-4-31B requires a recent Transformers build with `gemma4` support.
-- `generate_traces.py` includes Gemma tokenizer fallback logic (`extra_special_tokens={}`) to avoid tokenizer config incompatibilities on some installations.
-
-## Ground-Truth Graphs
-
-### Generate Ground Truth (API)
+## Typical commands
 
 Single experiment:
+
 ```bash
+# 1) traces
+sbatch generate.sh velocity_from_ke Qwen2.5-32B 250
+
+# 2) reject
+bash reject_traces.sh velocity_from_ke Qwen2.5-32B
+
+# 3) pair generation (API)
+bash generate_pairs.sh velocity_from_ke Qwen2.5-32B
+
+# 4) post-process
+bash post_process.sh velocity_from_ke Qwen2.5-32B
+
+# 5) patching
+sbatch --export=ALL,MODEL_NAME=Qwen2.5-32B,PATCH_BATCH_SIZE=16 patch_graph.sh velocity_from_ke Qwen2.5-32B
+
+# 6) graph construction (fast CPU parse)
+bash construct_graph.sh velocity_from_ke Qwen2.5-32B pair
+
+# 7) API ground-truth graph
 bash generate_ground_truth_graphs_api.sh Qwen2.5-32B velocity_from_ke
+
+# 8) evaluate candidate vs GT
+python evaluate_graphs_against_ground_truth.py \
+  --model-name Qwen2.5-32B \
+  --experiments velocity_from_ke \
+  --output-dir smoke_logs/graph_eval_qwen_vs_gt_velocity_from_ke
 ```
 
 All experiments:
+
 ```bash
-bash run_gt_qwen_all.sh
-```
+# GPU traces
+MODEL_NAME=Qwen2.5-32B SAMPLES_PER_FORMAT=10 GPUS_PER_NODE=1 bash generate_all.sh
 
-Outputs are written to:
-`/scratch/<user>/traces/<model>/<experiment>/graphs_ground_truth_api/`
+# CPU/API pipeline
+MODEL_NAME=Qwen2.5-32B RUN_MODE=local bash reject_traces_all.sh
+MODEL_NAME=Qwen2.5-32B RUN_MODE=local bash generate_pairs_all.sh
+MODEL_NAME=Qwen2.5-32B RUN_MODE=local bash post_process_all.sh
 
-### Evaluate Candidate Graphs vs Ground Truth
+# GPU patching
+MODEL_NAME=Qwen2.5-32B PATCH_BATCH_SIZE=16 bash patch_graph_all.sh
 
-Run evaluation:
-```bash
+# CPU graph construction
+MODEL_NAME=Qwen2.5-32B GRAPH_VARIANT=pair USE_SLURM=0 bash construct_graph_all.sh
+
+# API ground-truth (login node)
+MODEL_NAME=Qwen2.5-32B bash run_gt_qwen_all.sh
+
+# Full evaluation
 python evaluate_graphs_against_ground_truth.py \
   --model-name Qwen2.5-32B \
   --output-dir smoke_logs/graph_eval_qwen_vs_gt_full
 ```
 
-Generated files:
-- `overall_metrics.tsv`
-- `experiment_metrics.tsv`
-- `pair_metrics.tsv`
-- `summary.json`
+## Output files
 
-Current Qwen2.5-32B full-run snapshot:
+Per experiment under:
+`/scratch/<user>/traces/<model>/<experiment>/`
+
+Key artifacts:
+
+- `traces.json`
+- `reject_traces.json`
+- `paired_traces.json`
+- `aligned_pairs.json`
+- `patch_runs/` and `patch_runs/patching_summary.json`
+- `graphs/` and `graphs/pair*/graph.json`
+- `graphs_ground_truth_api/` and `graphs_ground_truth_api/graph_summary.json`
+
+Evaluation artifacts:
+
+- `smoke_logs/graph_eval_*/overall_metrics.tsv`
+- `smoke_logs/graph_eval_*/experiment_metrics.tsv`
+- `smoke_logs/graph_eval_*/pair_metrics.tsv`
+- `smoke_logs/graph_eval_*/summary.json`
+
+## Current full-run snapshots
+
+Qwen2.5-32B (`smoke_logs/graph_eval_qwen_vs_gt_full/overall_metrics.tsv`):
+
 - Edge micro: `P=0.365940`, `R=0.666059`, `F1=0.472360`, `J=0.309209`
 - Closure micro: `P=0.781966`, `R=0.727767`, `F1=0.753894`, `J=0.605000`
+- Pairs compared: `1254`
 
-## Graph Validation
+Gemma-4-31B (`smoke_logs/graph_eval_gemma_vs_gt_full_20260506_155555_rerun/overall_metrics.tsv`):
 
-The pipeline includes two types of causal validation to verify the constructed graphs reflect true computational structure:
+- Edge micro: `P=0.338216`, `R=0.913570`, `F1=0.493669`, `J=0.327729`
+- Closure micro: `P=0.756385`, `R=0.938316`, `F1=0.837585`, `J=0.720556`
+- Pairs compared: `1026`
 
-### Token-Level Intervention (`intervene_validate_causal_structure.py`)
+## Important implementation notes
 
-Tests the causal assumptions by corrupting nodes and observing whether answers change:
+- The nopair/noise branch is intentionally excluded from the main documented flow.
+- `generate_pairs.sh` now auto-loads `.env` (if present) so API keys/config are available during pair generation.
+- `intervene_generate_pairs.py` supports environments without `python-dotenv` installed (safe fallback import).
+- `intervene_graph.py` now includes CUDA OOM backoff during patch batching (automatic batch-size halving retry).
+- `intervene_graph.py` writes model metadata from the actual model path instead of hardcoded model names.
+- Gemma-4-31B requires a recent Transformers build with `gemma4` support.
 
-- **Positive Control**: Corrupt direct parents of a value → answer should change (hit rate).
-- **Negative Control**: Corrupt non-parent nodes → answer should remain unchanged (false alarm rate).
-- **Corruption Methods**:
-  - False values: replace numbers with incorrect ones (e.g., 0.57 → 1.14)
-  - Masking: replace with [REDACTED] or $VALUE placeholders
-  - Counterfactuals: use values from paired traces when available
-  
-- **Metrics**:
-  - **Sensitivity**: % of positive controls where answer changed (target: high)
-  - **Specificity**: % of negative controls where answer remained unchanged (target: high)
-  - **Hit-rate by method**: how effective each corruption strategy is
+## Legacy/diagnostic scripts
 
-Example output: "Sensitivity: 85%, Specificity: 92%" means the graph correctly identifies 85% of true parents and has only 8% false edges.
+These scripts still exist, but are no longer the primary graph-quality benchmark:
 
-### Node Skipping (`intervene_skip_nodes.py`)
+- `intervene_validate_causal_structure.py`
+- `intervene_skip_nodes.py`
 
-Tests whether intermediate values are necessary by progressively truncating them:
-
-1. Select the final answer value and its parent chain
-2. For different truncation depths:
-   - Truncate before a parent node
-   - Force the model to continue generating: `... [value] = `
-   - Check if the model can still compute the correct answer
-3. Record which ancestors can be bypassed
-
-- **Metrics**:
-  - **Success rate**: % of skip attempts where model generated text
-  - **Robustness score**: % of successful skips with correct answers (target: should decrease as more ancestors are skipped)
-
-Example: If the final answer is `0.57 = 30 / 52.8`, we test:
-- Can model compute this if we hide the `52.8`? (one parent truncated)
-- Can model compute this if we hide both `30` and `52.8`? (all parents truncated)
-- Higher robustness score indicates some parents are redundant or reconstructible
-
-## Usage Examples
-
-Single experiment on single pair:
-```bash
-bash validate_causal_structure.sh Qwen2.5-72B velocity
-bash skip_nodes.sh Qwen2.5-72B velocity
-```
-
-All experiments on a model (uses registered experiments from `prompts.py`):
-```bash
-bash validate_causal_structure_all.sh Qwen2.5-72B
-bash skip_nodes_all.sh Qwen2.5-72B
-```
-
-Custom graph directory:
-```bash
-python intervene_validate_causal_structure.py --model-name Qwen2.5-72B --graph-dir /path/to/patch_runs
-```
+They remain useful for targeted debugging, while the primary benchmark is now candidate-vs-ground-truth graph comparison.

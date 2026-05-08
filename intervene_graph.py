@@ -370,6 +370,11 @@ def forward_logits_batch(model, batch_token_ids: List[List[int]]) -> torch.Tenso
     return out.logits
 
 
+def is_cuda_oom(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "out of memory" in text and "cuda" in text
+
+
 def compute_next_token_logprobs(logits: torch.Tensor, reference_token_ids: List[int], usable_len: int) -> List[float]:
     log_probs = F.log_softmax(logits, dim=-1)
     scores = []
@@ -512,6 +517,8 @@ def main():
 
     print(f"Running {len(exp_indices)} experiments...")
 
+    resolved_model_name = Path(MODEL_PATH).name
+
     run_records = []
     pair_merged_payloads = {}
     OUTPUT_ROOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -604,21 +611,43 @@ def main():
         print("    Phase 2: token-level counterfactual swaps")
         print(f"      Changed positions requiring forwards: {len(changed_positions)} / {len(pos_indices)}")
 
-        for batch_start in range(0, len(changed_positions), PATCH_BATCH_SIZE):
-            batch_positions = changed_positions[batch_start: batch_start + PATCH_BATCH_SIZE]
-            batch_token_ids: List[List[int]] = []
-            for pos in batch_positions:
-                patched = list(base_token_ids)
-                patched[pos] = cf_token_ids[pos]
-                batch_token_ids.append(patched)
+        batch_start = 0
+        while batch_start < len(changed_positions):
+            attempted_batch_size = min(PATCH_BATCH_SIZE, len(changed_positions) - batch_start)
+            while True:
+                batch_positions = changed_positions[batch_start: batch_start + attempted_batch_size]
+                batch_token_ids: List[List[int]] = []
+                for pos in batch_positions:
+                    patched = list(base_token_ids)
+                    patched[pos] = cf_token_ids[pos]
+                    batch_token_ids.append(patched)
 
-            patched_logits = forward_logits_batch(model, batch_token_ids)
-            for batch_offset, pos in enumerate(batch_positions):
-                col = pos_to_col[pos]
-                patched_cf_score = score_logprob_at_position(patched_logits[batch_offset], score_pos, int(cf_score_token_id))
-                patched_base_score = score_logprob_at_position(patched_logits[batch_offset], score_pos, int(base_score_token_id))
-                source_delta_matrix[0, col] = patched_cf_score - baseline_cf_score
-                base_delta_matrix[0, col] = patched_base_score - baseline_base_score
+                try:
+                    patched_logits = forward_logits_batch(model, batch_token_ids)
+                    for batch_offset, pos in enumerate(batch_positions):
+                        col = pos_to_col[pos]
+                        patched_cf_score = score_logprob_at_position(patched_logits[batch_offset], score_pos, int(cf_score_token_id))
+                        patched_base_score = score_logprob_at_position(patched_logits[batch_offset], score_pos, int(base_score_token_id))
+                        source_delta_matrix[0, col] = patched_cf_score - baseline_cf_score
+                        base_delta_matrix[0, col] = patched_base_score - baseline_base_score
+                    del patched_logits
+                    if DEVICE.startswith("cuda") and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    batch_start += attempted_batch_size
+                    break
+                except RuntimeError as e:
+                    if not is_cuda_oom(e):
+                        raise
+                    if DEVICE.startswith("cuda") and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    if attempted_batch_size <= 1:
+                        print("      CUDA OOM even at batch size 1; aborting this experiment.")
+                        raise
+                    reduced_batch_size = max(1, attempted_batch_size // 2)
+                    print(
+                        f"      CUDA OOM at patch batch {attempted_batch_size}; retrying with {reduced_batch_size}."
+                    )
+                    attempted_batch_size = reduced_batch_size
 
         diff_delta_matrix = source_delta_matrix - base_delta_matrix
 
@@ -729,7 +758,7 @@ def main():
             pair_merged_payloads[pair_key] = {
                 "schema_version": "v1",
                 "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                "model": "Qwen2.5-32B",
+                "model": resolved_model_name,
                 "pair_id": pair_id,
                 "entries": [],
             }
@@ -809,7 +838,7 @@ def main():
     output = {
         "schema_version": "v1",
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "model": "Qwen2.5-32B",
+        "model": resolved_model_name,
         "total_runs": len(merged_runs),
         "runs_completed_this_invocation": len(run_records),
         "configuration": {

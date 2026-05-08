@@ -8,3 +8,5 @@ __pycache__/*
 *.png
 
 *.out
+
+smoke_logs/

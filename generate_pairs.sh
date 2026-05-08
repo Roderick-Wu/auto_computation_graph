@@ -32,6 +32,15 @@ if [ ! -f "$traces_json" ]; then
     fi
 fi
 
+# Load API credentials/config from project .env when available.
+dotenv_file="$WRODERI_PROJECT_ROOT/auto_computation_graph/.env"
+if [ -f "$dotenv_file" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$dotenv_file"
+    set +a
+fi
+
 if [ -d venv ]; then
     source venv/bin/activate
 fi
