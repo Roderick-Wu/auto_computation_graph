@@ -327,7 +327,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--top-k", type=int, default=5)
     p.add_argument("--quantile", type=float, default=0.9)
     p.add_argument("--fdr-q", type=float, default=0.5)
-    p.add_argument("--min-tokens", type=int, default=1, help="Minimum number of selected token positions per child node.")
+    p.add_argument("--min-tokens", type=int, default=0, help="Minimum number of selected token positions per child node.")
     p.add_argument(
         "--relative-edge-threshold",
         type=float,
@@ -336,12 +336,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--parent-causal-rule",
-        choices=["token_filter_then_relative", "strongest_plus_relative"],
-        default="token_filter_then_relative",
+        choices=["token_filter_then_relative", "strongest_plus_relative", "bh_only"],
+        default="bh_only",
         help=(
             "Parent selection rule. token_filter_then_relative uses selected token positions first. "
             "strongest_plus_relative scores all parent-span positions and always keeps the strongest parent "
-            "(if above strongest-min-weight), plus parents above relative-edge-threshold."
+            "(if above strongest-min-weight), plus parents above relative-edge-threshold. "
+            "bh_only keeps every parent value containing a BH-selected token and applies no relative pruning/fallback."
         ),
     )
     p.add_argument(
@@ -768,7 +769,7 @@ def build_graph_for_pair(
         fallback_parent: Optional[str] = None
         fallback_parent_weight: Optional[float] = None
 
-        if parent_strength:
+        if parent_strength and cfg.parent_causal_rule != "bh_only":
             max_w = max(parent_strength.values())
             keep_thresh = cfg.relative_edge_threshold * max_w
             kept = {p: w for p, w in parent_strength.items() if w >= keep_thresh}
@@ -1135,7 +1136,7 @@ def main() -> None:
         top_k=args.top_k,
         quantile=args.quantile,
         fdr_q=args.fdr_q,
-        min_tokens=max(1, args.min_tokens),
+        min_tokens=max(0, args.min_tokens),
         relative_edge_threshold=max(0.0, args.relative_edge_threshold),
         parent_causal_rule=args.parent_causal_rule,
         edge_build_scope=args.edge_build_scope,

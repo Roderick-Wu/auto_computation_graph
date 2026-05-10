@@ -15,7 +15,7 @@ SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
 EXPERIMENT=${1:-velocity}
-MODEL_NAME=${2:-${MODEL_NAME:-Qwen2.5-32B}}
+MODEL_NAME=${2:-${MODEL_NAME:-Qwen2.5-72B}}
 PATCH_BATCH_SIZE=${PATCH_BATCH_SIZE:-16}
 TOKEN_POSITIONS_TO_PATCH=${TOKEN_POSITIONS_TO_PATCH:-all}
 

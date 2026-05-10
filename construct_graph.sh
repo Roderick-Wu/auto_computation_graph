@@ -79,16 +79,17 @@ if [ -z "${PARENT_CAUSAL_RULE+x}" ]; then
     if [ "$IS_NOPAIR_VARIANT" -eq 1 ]; then
         PARENT_CAUSAL_RULE="token_filter_then_relative"
     else
-        PARENT_CAUSAL_RULE="strongest_plus_relative"
+        PARENT_CAUSAL_RULE="bh_only"
     fi
 fi
 
 EDGE_BUILD_SCOPE="${EDGE_BUILD_SCOPE:-all_nodes}"
 STRONGEST_MIN_WEIGHT="${STRONGEST_MIN_WEIGHT:-0.0}"
+MIN_TOKENS="${MIN_TOKENS:-0}"
 GRAPH_RENDER="${GRAPH_RENDER:-png}"
 GRAPH_LAYOUT="${GRAPH_LAYOUT:-dot}"
 
-echo "Graph config: layer_agg=$LAYER_AGG selection=$SELECTION_METHOD fdr_q=$FDR_Q rel_edge=$RELATIVE_EDGE_THRESHOLD parent_rule=$PARENT_CAUSAL_RULE edge_scope=$EDGE_BUILD_SCOPE strongest_min=$STRONGEST_MIN_WEIGHT render=$GRAPH_RENDER"
+echo "Graph config: layer_agg=$LAYER_AGG selection=$SELECTION_METHOD fdr_q=$FDR_Q min_tokens=$MIN_TOKENS rel_edge=$RELATIVE_EDGE_THRESHOLD parent_rule=$PARENT_CAUSAL_RULE edge_scope=$EDGE_BUILD_SCOPE strongest_min=$STRONGEST_MIN_WEIGHT render=$GRAPH_RENDER"
 
 python -u construct_graph.py \
   --patch-runs-dir "$PATCH_MATRIX_DIR" \
@@ -100,6 +101,7 @@ python -u construct_graph.py \
   --top-k "$TOP_K" \
   --quantile "$QUANTILE" \
   --fdr-q "$FDR_Q" \
+  --min-tokens "$MIN_TOKENS" \
   --relative-edge-threshold "$RELATIVE_EDGE_THRESHOLD" \
   --parent-causal-rule "$PARENT_CAUSAL_RULE" \
   --edge-build-scope "$EDGE_BUILD_SCOPE" \

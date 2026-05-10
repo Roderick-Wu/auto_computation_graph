@@ -50,4 +50,4 @@ cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
 python intervene_generate_pairs.py \
     --model-name "$model_name" \
     --experiment "$experiment" \
-    --traces-json "$traces_json" \
+    --traces-json "$traces_json"

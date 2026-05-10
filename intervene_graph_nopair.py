@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -118,7 +118,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-path", type=str, default=MODEL_PATH, help="Model path for AutoModelForCausalLM.")
     parser.add_argument("--tokenizer-path", type=str, default=TOKENIZER_PATH, help="Tokenizer path for AutoTokenizer.")
     parser.add_argument("--device", type=str, default=DEVICE, help="Device to run on (e.g., cuda, cpu).")
-    parser.add_argument("--dtype", type=str, default="float16" if DTYPE == torch.float16 else "float32", choices=["float16", "float32"], help="Model dtype.")
+    parser.add_argument("--dtype", type=str, default="float16" if DTYPE == torch.float16 else "float32", choices=["float16", "bfloat16", "float32"], help="Model dtype.")
     parser.add_argument("--no-plots", action="store_true", help="Disable heatmap PNG generation and only write JSON outputs.")
     return parser
 
@@ -419,7 +419,10 @@ def load_model_and_tokenizer():
     print(f"Loading model from {MODEL_PATH}...")
     tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
 
-    model = AutoModelForCausalLM.from_pretrained(
+    config = AutoConfig.from_pretrained(MODEL_PATH)
+    model_cls = AutoModelForImageTextToText if getattr(config, "model_type", None) == "mistral3" else AutoModelForCausalLM
+
+    model = model_cls.from_pretrained(
         MODEL_PATH,
         device_map="auto",
         torch_dtype=DTYPE,
@@ -585,7 +588,11 @@ def main():
     MODEL_PATH = args.model_path
     TOKENIZER_PATH = args.tokenizer_path
     DEVICE = args.device
-    DTYPE = torch.float16 if args.dtype == "float16" else torch.float32
+    DTYPE = {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }[args.dtype]
     SAVE_PLOTS = not args.no_plots
 
     NOISE_MODE = args.noise_mode

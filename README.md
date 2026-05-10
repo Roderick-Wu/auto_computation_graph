@@ -37,6 +37,46 @@ The active flow is the **counterfactual pair** variant:
   - `generate_pairs.sh` / `generate_pairs_all.sh`
   - `generate_ground_truth_graphs_api.py` / `generate_ground_truth_graphs_api.sh` / `run_gt_qwen_all.sh`
 
+## Graph Construction
+
+The paired-counterfactual graph constructor defaults to a BH-only rule:
+
+```bash
+GRAPH_VARIANT=pair GRAPH_RENDER=none MODEL_NAME=Qwen2.5-32B bash construct_graph_all.sh
+```
+
+Default paired settings:
+- `SELECTION_METHOD=fdr`
+- `FDR_Q=0.2`
+- `PARENT_CAUSAL_RULE=bh_only`
+- `MIN_TOKENS=0`
+- `EDGE_BUILD_SCOPE=all_nodes`
+
+In this mode, [construct_graph.py](construct_graph.py) first applies BH FDR control to the layer-aggregated patching scores for each child value.
+It then keeps a parent edge for every earlier value whose own token span contains at least one BH-selected token.
+Selected outlier tokens outside value spans are ignored.
+No relative threshold or fallback parent rule is applied.
+
+To reproduce the older relative-pruning rule:
+
+```bash
+PARENT_CAUSAL_RULE=strongest_plus_relative RELATIVE_EDGE_THRESHOLD=0.3 MIN_TOKENS=1 \
+  GRAPH_VARIANT=pair GRAPH_RENDER=none MODEL_NAME=Qwen2.5-32B bash construct_graph_all.sh
+```
+
+To sweep the BH FDR threshold and produce paper-friendly CSVs/plots:
+
+```bash
+python run_fdr_q_sweep.py \
+  --models gpt-oss-20b,Llama3.1-70B,Mistral-Small-3.1-24B-Base-2503 \
+  --fdr-q-values 0.01,0.02,0.05,0.1,0.2,0.3,0.5
+```
+
+The sweep writes separate candidate graph directories named
+`graphs_bh_only_fdr_q_<q>` under each trace experiment, evaluates each setting
+against `graphs_ground_truth_api`, and writes summaries to
+`compiled_results/fdr_q_sweep/`.
+
 ## Typical commands
 
 Single experiment:

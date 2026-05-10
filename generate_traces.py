@@ -13,7 +13,7 @@ Usage:
 
 import sys
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 from pathlib import Path
 import json
 import argparse
@@ -90,7 +90,9 @@ except Exception as e:
         tokenizer = AutoTokenizer.from_pretrained(args.model_path, use_fast=False)
 
 print("Loading HuggingFace model with device_map='auto'...")
-model = AutoModelForCausalLM.from_pretrained(
+config = AutoConfig.from_pretrained(args.model_path)
+model_auto_class = AutoModelForImageTextToText if getattr(config, "model_type", None) == "mistral3" else AutoModelForCausalLM
+model = model_auto_class.from_pretrained(
     args.model_path,
     torch_dtype=torch.bfloat16,
     device_map="auto",
@@ -103,12 +105,17 @@ tokenizer.padding_side = 'left'
 
 cfg = model.config
 text_cfg = getattr(cfg, "text_config", None)
+language_cfg = getattr(cfg, "language_config", None)
 num_layers = getattr(cfg, "num_hidden_layers", None)
 hidden_size = getattr(cfg, "hidden_size", None)
 if num_layers is None and text_cfg is not None:
     num_layers = getattr(text_cfg, "num_hidden_layers", None)
 if hidden_size is None and text_cfg is not None:
     hidden_size = getattr(text_cfg, "hidden_size", None)
+if num_layers is None and language_cfg is not None:
+    num_layers = getattr(language_cfg, "num_hidden_layers", None)
+if hidden_size is None and language_cfg is not None:
+    hidden_size = getattr(language_cfg, "hidden_size", None)
 
 if num_layers is not None and hidden_size is not None:
     print(f"Model loaded: {num_layers} layers, {hidden_size} dimensions\n")

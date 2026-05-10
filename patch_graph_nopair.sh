@@ -14,7 +14,7 @@ if [ "$#" -lt 1 ]; then
 fi
 
 experiment="$1"
-model_name="${2:-${MODEL_NAME:-Qwen2.5-32B}}"
+model_name="${2:-${MODEL_NAME:-Qwen2.5-72B}}"
 PATCH_BATCH_SIZE="${PATCH_BATCH_SIZE:-16}"
 TOKEN_POSITIONS_TO_PATCH="${TOKEN_POSITIONS_TO_PATCH:-all}"
 NOISE_MODE="${NOISE_MODE:-gaussian}"

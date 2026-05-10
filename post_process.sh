@@ -35,4 +35,4 @@ cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
 python post_process_pairs.py \
     --model-name "$model_name" \
     --experiment "$experiment" \
-    --input-json "$traces_json" \
+    --input-json "$traces_json"

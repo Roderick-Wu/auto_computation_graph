@@ -32,6 +32,15 @@ from workspace_paths import resolve_model_path, resolve_scratch_root
 NUMBER_PATTERN = re.compile(r"(?<![\w.])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?(?![\w.])")
 UNIT_PATTERN = re.compile(r"^\s*([A-Za-z%\/\^\*\-]+(?:\/[A-Za-z%\/\^\*\-]+)?)")
 QUESTION_MARKER_PATTERN = re.compile(r"(?:\[\s*question\s*\]|question\s*[:\]\-])", re.IGNORECASE)
+META_CONTINUATION_PATTERN = re.compile(
+    r"\bthe\s+user\s+(?:says|said|wants|asked|is\s+asking)\b|"
+    r"\bi\s+want\s+to\s+see\s+the\s+solution\s+in\s+a\s+different\s+way\b|"
+    r"\bwe\s+need\s+to\s+(?:produce|provide|write|give|answer)\b|"
+    r"\bwe\s+can\s+rephrase\b|"
+    r"\bnot\s+too\s+similar\b",
+    re.IGNORECASE,
+)
+SENTENCE_PATTERN = re.compile(r"[^.!?\n]{1,200}[.!?]")
 FINAL_ANSWER_PATTERN = re.compile(
     r"(?:the\s+answer\s+is|final\s+answer\s*(?:is|=)|answer\s*(?:is|=|:))\s*"
     r"([-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?)",
@@ -237,16 +246,57 @@ def extract_expected_answer_from_metadata(prompt_metadata: Dict[str, Any]) -> Tu
 
 
 def truncate_after_first_question_block(text: Optional[str]) -> Tuple[Optional[str], bool]:
-    """Remove spillover into a second question block if the model keeps going."""
+    """Remove spillover if the model continues into a second prompt or meta-dialogue."""
     if not text:
         return text, False
 
+    truncation_points: List[int] = []
+
     matches = list(QUESTION_MARKER_PATTERN.finditer(text))
-    if len(matches) < 2:
+    if len(matches) >= 2:
+        truncation_points.append(matches[1].start())
+
+    meta_match = META_CONTINUATION_PATTERN.search(text)
+    if meta_match is not None:
+        truncation_points.append(meta_match.start())
+
+    repetition_start = find_repeated_sentence_truncation_point(text)
+    if repetition_start is not None:
+        truncation_points.append(repetition_start)
+
+    if not truncation_points:
         return text, False
 
-    second_start = matches[1].start()
-    return text[:second_start].rstrip(), True
+    return text[: min(truncation_points)].rstrip(), True
+
+
+def normalize_repeated_sentence(sentence: str) -> str:
+    return re.sub(r"\s+", " ", sentence.strip().lower())
+
+
+def find_repeated_sentence_truncation_point(text: str) -> Optional[int]:
+    """Return a cut point for runaway repeated sentence-like tails."""
+    previous_norm: Optional[str] = None
+    repeat_count = 0
+    repeat_cut_start: Optional[int] = None
+
+    for match in SENTENCE_PATTERN.finditer(text):
+        norm = normalize_repeated_sentence(match.group(0))
+        if len(norm) < 4:
+            continue
+
+        if norm == previous_norm:
+            repeat_count += 1
+            if repeat_count == 2:
+                repeat_cut_start = match.start()
+            elif repeat_count >= 3 and repeat_cut_start is not None:
+                return repeat_cut_start
+        else:
+            previous_norm = norm
+            repeat_count = 1
+            repeat_cut_start = None
+
+    return None
 
 
 def extract_final_answer_value(text: Optional[str]) -> Optional[float]:
