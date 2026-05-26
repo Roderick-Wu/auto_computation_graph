@@ -189,3 +189,7 @@ These scripts still exist, but are no longer the primary graph-quality benchmark
 - `intervene_skip_nodes.py`
 
 They remain useful for targeted debugging, while the primary benchmark is now candidate-vs-ground-truth graph comparison.
+
+## License
+
+This project is released under the [MIT License](https://opensource.org/licenses/MIT).
