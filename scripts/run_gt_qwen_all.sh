@@ -50,8 +50,8 @@ while IFS=$'\t' read -r experiment _n_formats; do
 
   echo
   echo "=== Ground-truth API generation: model=$MODEL_NAME experiment=$experiment ==="
-  python generate_ground_truth_graphs_api.py "${args[@]}"
-done < <(python "$THIS_DIR/list_all_experiments.py")
+  python "$WRODERI_REPO_ROOT/src/generate_ground_truth_graphs_api.py" "${args[@]}"
+done < <(python "$WRODERI_REPO_ROOT/src/list_all_experiments.py")
 
 echo
 echo "Completed ground-truth API sweep for $MODEL_NAME."

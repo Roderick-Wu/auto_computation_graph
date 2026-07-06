@@ -56,7 +56,7 @@ echo "Noise scale: $NOISE_SCALE"
 echo "Noise seed: $NOISE_SEED"
 echo "Noise samples/token: $NOISE_SAMPLES_PER_TOKEN"
 
-python -u intervene_graph_nopair.py \
+python -u "$WRODERI_REPO_ROOT/src/intervene_graph_nopair.py" \
     --input-json "$input_json" \
     --output-root-dir "$output_root_dir" \
     --model-path "$model_path" \

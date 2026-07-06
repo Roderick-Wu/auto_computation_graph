@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 MODEL_NAME="${MODEL_NAME:-Qwen2.5-72B}"
 RUN_MODE="${RUN_MODE:-local}"
 
@@ -14,12 +17,12 @@ do
     [ -z "$experiment" ] && continue
     if [[ "$RUN_MODE" == "local" ]]; then
         echo "Running post-process locally for ${experiment} (${n_formats} formats) on ${MODEL_NAME}"
-        bash post_process.sh "$experiment" "$MODEL_NAME"
+        bash "$SCRIPT_DIR/post_process.sh" "$experiment" "$MODEL_NAME"
     else
         echo "Submitting post-process job for ${experiment} (${n_formats} formats) on ${MODEL_NAME}"
-        sbatch post_process.sh "$experiment" "$MODEL_NAME"
+        sbatch "$SCRIPT_DIR/post_process.sh" "$experiment" "$MODEL_NAME"
     fi
-done < <(python list_all_experiments.py)
+done < <(python "$WRODERI_REPO_ROOT/src/list_all_experiments.py")
 
 if [[ "$RUN_MODE" == "local" ]]; then
     echo "All post-processing runs completed locally."

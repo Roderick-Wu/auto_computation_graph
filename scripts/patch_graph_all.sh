@@ -50,8 +50,8 @@ PY
     sbatch \
         --gpus-per-node="h100:$H100_GPUS" \
         --export=ALL,MODEL_NAME="$MODEL_NAME",PATCH_BATCH_SIZE="$PATCH_BATCH_SIZE",TOKEN_POSITIONS_TO_PATCH="$TOKEN_POSITIONS_TO_PATCH" \
-        patch_graph.sh "$experiment" "$MODEL_NAME"
+        "$SCRIPT_DIR/patch_graph.sh" "$experiment" "$MODEL_NAME"
     submitted=$((submitted + 1))
-done < <(python list_all_experiments.py)
+done < <(python "$WRODERI_REPO_ROOT/src/list_all_experiments.py")
 
 echo "Counterfactual token-swap submission complete for ${MODEL_NAME}: submitted=${submitted} skipped=${skipped}"

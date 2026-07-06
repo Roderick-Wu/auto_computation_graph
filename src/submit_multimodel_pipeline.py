@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
+import sys
+
 
 @dataclass(frozen=True)
 class ModelConfig:
@@ -84,7 +86,9 @@ def run_sbatch(args: List[str], cwd: Path) -> str:
 
 def load_experiments(auto_graph_dir: Path) -> List[Tuple[str, int]]:
     out = subprocess.check_output(
-        ["python", "list_all_experiments.py"], cwd=auto_graph_dir, text=True
+        [sys.executable, str(auto_graph_dir / "src" / "list_all_experiments.py")],
+        cwd=auto_graph_dir,
+        text=True,
     )
     experiments: List[Tuple[str, int]] = []
     for line in out.splitlines():
@@ -125,19 +129,19 @@ def main() -> None:
         "--max-new-tokens",
         type=int,
         default=512,
-        help="Passed to generate.sh via MAX_NEW_TOKENS env.",
+        help="Passed to scripts/generate.sh via MAX_NEW_TOKENS env.",
     )
     parser.add_argument(
         "--manifest",
         default="smoke_logs/multimodel_pipeline_jobs.tsv",
-        help="Manifest path relative to auto_computation_graph.",
+        help="Manifest path relative to the repo root.",
     )
     args = parser.parse_args()
 
     if args.samples_per_format < 1:
         raise ValueError("--samples-per-format must be >= 1")
 
-    auto_graph_dir = Path(__file__).resolve().parent
+    auto_graph_dir = Path(__file__).resolve().parent.parent
     experiments = load_experiments(auto_graph_dir)
     model_cfgs = list(iter_model_configs([m.strip() for m in args.models.split(",") if m.strip()]))
 
@@ -158,7 +162,7 @@ def main() -> None:
                 f"dl_{model_tag}",
                 "-o",
                 dl_out,
-                "download_model_job.sh",
+                "scripts/download_model_job.sh",
                 cfg.repo_id,
                 cfg.local_name,
             ],
@@ -184,7 +188,7 @@ def main() -> None:
                     f"smoke_logs/gen_{model_tag}_{exp_tag}_%j.out",
                     "--export",
                     f"ALL,MAX_NEW_TOKENS={args.max_new_tokens}",
-                    "generate.sh",
+                    "scripts/generate.sh",
                     exp,
                     cfg.local_name,
                     str(n_prompts),
@@ -200,7 +204,7 @@ def main() -> None:
                     f"afterok:{gen_job}",
                     "-o",
                     f"smoke_logs/reject_{model_tag}_{exp_tag}_%j.out",
-                    "reject_traces.sh",
+                    "scripts/reject_traces.sh",
                     exp,
                     cfg.local_name,
                 ],
@@ -215,7 +219,7 @@ def main() -> None:
                     f"afterok:{reject_job}",
                     "-o",
                     f"smoke_logs/pair_{model_tag}_{exp_tag}_%j.out",
-                    "generate_pairs.sh",
+                    "scripts/generate_pairs.sh",
                     exp,
                     cfg.local_name,
                 ],
@@ -230,7 +234,7 @@ def main() -> None:
                     f"afterok:{pair_job}",
                     "-o",
                     f"smoke_logs/post_{model_tag}_{exp_tag}_%j.out",
-                    "post_process.sh",
+                    "scripts/post_process.sh",
                     exp,
                     cfg.local_name,
                 ],
@@ -249,7 +253,7 @@ def main() -> None:
                     f"smoke_logs/patch_{model_tag}_{exp_tag}_%j.out",
                     "--export",
                     "ALL,MODEL_NAME={}".format(cfg.local_name),
-                    "patch_graph.sh",
+                    "scripts/patch_graph.sh",
                     exp,
                     cfg.local_name,
                 ],

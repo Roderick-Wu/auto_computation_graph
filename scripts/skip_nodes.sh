@@ -21,7 +21,7 @@ EXPERIMENT="${2:-velocity}"
 GRAPH_DIR="${3:-}"
 MAX_PAIRS="${4:-0}"
 
-cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
+cd "$WRODERI_REPO_ROOT"
 
 if [[ -z "$GRAPH_DIR" ]]; then
     GRAPH_DIR="$WRODERI_SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT/graphs"
@@ -31,7 +31,7 @@ echo "Testing node skipping for: $EXPERIMENT on $MODEL_NAME"
 echo "Graph directory: $GRAPH_DIR"
 echo "Max pairs: ${MAX_PAIRS} (0 means all available graphs)"
 
-python intervene_skip_nodes.py \
+python "$WRODERI_REPO_ROOT/src/intervene_skip_nodes.py" \
     --model-name "$MODEL_NAME" \
     --experiment "$EXPERIMENT" \
     --graph-dir "$GRAPH_DIR" \

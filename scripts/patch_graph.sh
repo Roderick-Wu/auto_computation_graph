@@ -36,7 +36,7 @@ echo "Output: $OUTPUT_ROOT_DIR"
 echo "Patch batch size: $PATCH_BATCH_SIZE"
 echo "Token positions: $TOKEN_POSITIONS_TO_PATCH"
 
-python -u intervene_graph.py \
+python -u "$WRODERI_REPO_ROOT/src/intervene_graph.py" \
   --input-json "$INPUT_JSON" \
   --output-root-dir "$OUTPUT_ROOT_DIR" \
   --model-path "$MODEL_PATH" \

@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from workspace_paths import resolve_auto_traces_root, resolve_model_path, resolve_project_root
+from workspace_paths import resolve_auto_traces_root, resolve_model_path, resolve_repo_root
 
 
 @dataclass
@@ -79,8 +79,8 @@ def get_all_experiments(model_name: str) -> List[str]:
     """Get list of all registered experiments from list_all_experiments.py."""
     try:
         result = subprocess.run(
-            ["python", "list_all_experiments.py"],
-            cwd=str(resolve_project_root() / "auto_computation_graph"),
+            [sys.executable, str(resolve_repo_root() / "src" / "list_all_experiments.py")],
+            cwd=str(resolve_repo_root()),
             capture_output=True,
             text=True,
             timeout=10,
@@ -193,8 +193,8 @@ def main():
     )
     parser.add_argument("--model-name", type=str, default="Qwen2.5-72B", help="Model folder name.")
     parser.add_argument("--output-json", type=Path, default=None, help="Output report JSON.")
-    parser.add_argument("--low-threshold", type=float, default=0.50, help="Threshold for 'low acceptance' warning (default 50%).")
-    parser.add_argument("--concerning-threshold", type=float, default=0.70, help="Threshold for 'concerning acceptance' warning (default 70%).")
+    parser.add_argument("--low-threshold", type=float, default=0.50, help="Threshold for 'low acceptance' warning (default 50%%).")
+    parser.add_argument("--concerning-threshold", type=float, default=0.70, help="Threshold for 'concerning acceptance' warning (default 70%%).")
     
     args = parser.parse_args()
     

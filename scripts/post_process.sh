@@ -30,9 +30,9 @@ if [ -d venv ]; then
     source venv/bin/activate
 fi
 
-cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
+cd "$WRODERI_REPO_ROOT"
 
-python post_process_pairs.py \
+python "$WRODERI_REPO_ROOT/src/post_process_pairs.py" \
     --model-name "$model_name" \
     --experiment "$experiment" \
     --input-json "$traces_json"

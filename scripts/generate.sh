@@ -72,6 +72,6 @@ fi
 
 #python generate_traces.py --experiment current --n_prompts 200 --max_new_tokens 256 --model_path "$WRODERI_PROJECT_ROOT/models/QwQ-32B-Preview"
 
-python generate_traces.py --experiment "$EXPERIMENT" --n_prompts "$N_PROMPTS" --max_new_tokens "$MAX_NEW_TOKENS" --model_path "$MODEL_PATH" --batch_size $BATCH
+python "$WRODERI_REPO_ROOT/src/generate_traces.py" --experiment "$EXPERIMENT" --n_prompts "$N_PROMPTS" --max_new_tokens "$MAX_NEW_TOKENS" --model_path "$MODEL_PATH" --batch_size $BATCH
 #python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path "$WRODERI_MODELS_ROOT/Llama3.1-8B"
 #python generate_traces.py --experiment $1 --n_prompts 50 --max_new_tokens 256 --model_path "$WRODERI_MODELS_ROOT/Llama3.1-70"

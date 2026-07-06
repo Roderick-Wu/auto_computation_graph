@@ -33,7 +33,7 @@ if [ ! -f "$traces_json" ]; then
 fi
 
 # Load API credentials/config from project .env when available.
-dotenv_file="$WRODERI_PROJECT_ROOT/auto_computation_graph/.env"
+dotenv_file="$WRODERI_REPO_ROOT/.env"
 if [ -f "$dotenv_file" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -45,9 +45,9 @@ if [ -d venv ]; then
     source venv/bin/activate
 fi
 
-cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
+cd "$WRODERI_REPO_ROOT"
 
-python intervene_generate_pairs.py \
+python "$WRODERI_REPO_ROOT/src/intervene_generate_pairs.py" \
     --model-name "$model_name" \
     --experiment "$experiment" \
     --traces-json "$traces_json"

@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List
 
 
-REPO_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = REPO_ROOT.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from workspace_paths import resolve_auto_traces_root
 
@@ -56,7 +55,11 @@ def write_csv(path: Path, rows: List[Dict[str, object]]) -> None:
 
 
 def registered_experiments() -> List[str]:
-    out = subprocess.check_output([sys.executable, "list_all_experiments.py"], cwd=REPO_ROOT, text=True)
+    out = subprocess.check_output(
+        [sys.executable, str(REPO_ROOT / "src" / "list_all_experiments.py")],
+        cwd=REPO_ROOT,
+        text=True,
+    )
     return [line.split("\t", 1)[0] for line in out.splitlines() if line.strip()]
 
 
@@ -76,7 +79,7 @@ def construct_for_experiment(model: str, exp: str, q: float, candidate_subdir: s
     cmd = [
         sys.executable,
         "-u",
-        "construct_graph.py",
+        str(REPO_ROOT / "src" / "construct_graph.py"),
         "--patch-runs-dir",
         str(patch_dir),
         "--output-dir",
@@ -109,7 +112,7 @@ def construct_for_experiment(model: str, exp: str, q: float, candidate_subdir: s
 def evaluate(model: str, experiments: List[str], candidate_subdir: str, output_dir: Path) -> Dict[str, object]:
     cmd = [
         sys.executable,
-        "evaluate_graphs_against_ground_truth.py",
+        str(REPO_ROOT / "src" / "evaluate_graphs_against_ground_truth.py"),
         "--model-name",
         model,
         "--experiments",

@@ -32,12 +32,12 @@ do
 
     if [ "$USE_SLURM" = "1" ]; then
         echo "Submitting graph construction job for ${experiment} (${n_formats} formats), variant=${GRAPH_VARIANT}"
-        sbatch --export=ALL,MODEL_NAME="$MODEL_NAME",GRAPH_VARIANT="$GRAPH_VARIANT",USE_SLURM="$USE_SLURM" construct_graph.sh "$experiment" "$MODEL_NAME" "$GRAPH_VARIANT"
+        sbatch --export=ALL,MODEL_NAME="$MODEL_NAME",GRAPH_VARIANT="$GRAPH_VARIANT",USE_SLURM="$USE_SLURM" "$SCRIPT_DIR/construct_graph.sh" "$experiment" "$MODEL_NAME" "$GRAPH_VARIANT"
     else
         echo "Running graph construction for ${experiment} (${n_formats} formats), variant=${GRAPH_VARIANT}"
-        bash construct_graph.sh "$experiment" "$MODEL_NAME" "$GRAPH_VARIANT"
+        bash "$SCRIPT_DIR/construct_graph.sh" "$experiment" "$MODEL_NAME" "$GRAPH_VARIANT"
     fi
-done < <(python list_all_experiments.py)
+done < <(python "$WRODERI_REPO_ROOT/src/list_all_experiments.py")
 
 if [ "$USE_SLURM" = "1" ]; then
     echo "Graph construction submission sweep complete."

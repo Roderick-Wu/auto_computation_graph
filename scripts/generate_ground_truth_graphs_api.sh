@@ -58,4 +58,4 @@ echo "  output     : $OUTPUT_DIR"
 echo "  max_pairs  : $MAX_PAIRS (0 means all)"
 echo "  render     : $RENDER"
 
-python generate_ground_truth_graphs_api.py "${ARGS[@]}"
+python "$WRODERI_REPO_ROOT/src/generate_ground_truth_graphs_api.py" "${ARGS[@]}"

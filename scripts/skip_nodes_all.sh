@@ -9,13 +9,13 @@ MAX_PAIRS="${2:-0}"
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 source "$SCRIPT_DIR/../workspace_paths.sh"
 
-cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
+cd "$WRODERI_REPO_ROOT"
 
 echo "Running node skipping tests for all experiments on $MODEL_NAME"
 
 while read -r experiment n_formats; do
     echo "===== $experiment ====="
-    sbatch skip_nodes.sh "$MODEL_NAME" "$experiment" "" "$MAX_PAIRS"
-done < <(python list_all_experiments.py)
+    sbatch "$SCRIPT_DIR/skip_nodes.sh" "$MODEL_NAME" "$experiment" "" "$MAX_PAIRS"
+done < <(python "$WRODERI_REPO_ROOT/src/list_all_experiments.py")
 
 echo "All node skipping tests complete."

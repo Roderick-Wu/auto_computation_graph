@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 MODEL_NAME="${MODEL_NAME:-Qwen2.5-72B}"
 PATCH_BATCH_SIZE="${PATCH_BATCH_SIZE:-16}"
 TOKEN_POSITIONS_TO_PATCH="${TOKEN_POSITIONS_TO_PATCH:-all}"
@@ -13,7 +16,7 @@ while read -r experiment n_formats
 do
     [ -z "$experiment" ] && continue
     echo "Submitting no-pair token-noise job for ${experiment} (${n_formats} formats) on ${MODEL_NAME}"
-    sbatch --export=ALL,MODEL_NAME="$MODEL_NAME",PATCH_BATCH_SIZE="$PATCH_BATCH_SIZE",TOKEN_POSITIONS_TO_PATCH="$TOKEN_POSITIONS_TO_PATCH",NOISE_MODE="$NOISE_MODE",NOISE_SCALE="$NOISE_SCALE",NOISE_SEED="$NOISE_SEED",NOISE_SAMPLES_PER_TOKEN="$NOISE_SAMPLES_PER_TOKEN" patch_graph_nopair.sh "$experiment" "$MODEL_NAME"
-done < <(python list_all_experiments.py)
+    sbatch --export=ALL,MODEL_NAME="$MODEL_NAME",PATCH_BATCH_SIZE="$PATCH_BATCH_SIZE",TOKEN_POSITIONS_TO_PATCH="$TOKEN_POSITIONS_TO_PATCH",NOISE_MODE="$NOISE_MODE",NOISE_SCALE="$NOISE_SCALE",NOISE_SEED="$NOISE_SEED",NOISE_SAMPLES_PER_TOKEN="$NOISE_SAMPLES_PER_TOKEN" "$SCRIPT_DIR/patch_graph_nopair.sh" "$experiment" "$MODEL_NAME"
+done < <(python "$WRODERI_REPO_ROOT/src/list_all_experiments.py")
 
 echo "All no-pair token-noise jobs submitted."

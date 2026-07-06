@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../workspace_paths.sh"
+
 MODEL_NAME="${MODEL_NAME:-Qwen2.5-72B}"
 RUN_MODE="${RUN_MODE:-local}"
 
@@ -14,12 +17,12 @@ do
     [ -z "$experiment" ] && continue
     if [[ "$RUN_MODE" == "local" ]]; then
         echo "Running reject-traces locally for ${experiment} (${n_formats} formats) on ${MODEL_NAME}"
-        bash reject_traces.sh "$experiment" "$MODEL_NAME"
+        bash "$SCRIPT_DIR/reject_traces.sh" "$experiment" "$MODEL_NAME"
     else
         echo "Submitting reject-traces job for ${experiment} (${n_formats} formats) on ${MODEL_NAME}"
-        sbatch reject_traces.sh "$experiment" "$MODEL_NAME"
+        sbatch "$SCRIPT_DIR/reject_traces.sh" "$experiment" "$MODEL_NAME"
     fi
-done < <(python list_all_experiments.py)
+done < <(python "$WRODERI_REPO_ROOT/src/list_all_experiments.py")
 
 if [[ "$RUN_MODE" == "local" ]]; then
     echo "All reject-traces runs completed locally."

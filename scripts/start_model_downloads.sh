@@ -4,19 +4,19 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SELF_DIR/../workspace_paths.sh"
 
-cd "$SELF_DIR"
+cd "$WRODERI_REPO_ROOT"
 
 module load python/3.11.5
 module load scipy-stack/2023b
 module load arrow/21.0.0
 
-mkdir -p smoke_logs
+mkdir -p "$WRODERI_REPO_ROOT/smoke_logs"
 
 download_one() {
     local repo_id="$1"
     local model_name="$2"
     local target_dir="$WRODERI_MODELS_ROOT/$model_name"
-    local log_file="$SELF_DIR/smoke_logs/download_${model_name}.log"
+    local log_file="$WRODERI_REPO_ROOT/smoke_logs/download_${model_name}.log"
 
     mkdir -p "$target_dir"
 

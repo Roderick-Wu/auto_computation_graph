@@ -28,8 +28,8 @@ if [ -d venv ]; then
     source venv/bin/activate
 fi
 
-cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
+cd "$WRODERI_REPO_ROOT"
 
-python reject_traces.py \
+python "$WRODERI_REPO_ROOT/src/reject_traces.py" \
     --model-name "$model_name" \
     --experiment "$experiment"

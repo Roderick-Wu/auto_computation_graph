@@ -20,9 +20,6 @@ EXPERIMENT=${1:-velocity}
 MODEL_NAME=${2:-Qwen2.5-32B}
 GRAPH_VARIANT=${3:-${GRAPH_VARIANT:-pair}}
 
-SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-source "$SCRIPT_DIR/../workspace_paths.sh"
-
 # Input/output paths
 TRACES_DIR="$WRODERI_SCRATCH_ROOT/traces/${MODEL_NAME}/${EXPERIMENT}"
 case "$GRAPH_VARIANT" in
@@ -91,7 +88,7 @@ GRAPH_LAYOUT="${GRAPH_LAYOUT:-dot}"
 
 echo "Graph config: layer_agg=$LAYER_AGG selection=$SELECTION_METHOD fdr_q=$FDR_Q min_tokens=$MIN_TOKENS rel_edge=$RELATIVE_EDGE_THRESHOLD parent_rule=$PARENT_CAUSAL_RULE edge_scope=$EDGE_BUILD_SCOPE strongest_min=$STRONGEST_MIN_WEIGHT render=$GRAPH_RENDER"
 
-python -u construct_graph.py \
+python -u "$WRODERI_REPO_ROOT/src/construct_graph.py" \
   --patch-runs-dir "$PATCH_MATRIX_DIR" \
   --output-dir "$OUTPUT_DIR" \
   --render "$GRAPH_RENDER" \

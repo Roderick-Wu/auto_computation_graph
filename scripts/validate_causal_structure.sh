@@ -27,7 +27,7 @@ FALSE_VALUE_MODE="${7:-deterministic}"
 RANDOM_SEED="${8:-123}"
 MAX_TESTS_PER_PAIR="${9:-${MAX_TESTS_PER_PAIR:-10}}"
 
-cd "$WRODERI_PROJECT_ROOT/auto_computation_graph"
+cd "$WRODERI_REPO_ROOT"
 
 if [[ -z "$GRAPH_DIR" ]]; then
     GRAPH_DIR="$WRODERI_SCRATCH_ROOT/traces/$MODEL_NAME/$EXPERIMENT/graphs"
@@ -47,7 +47,7 @@ if [[ -n "$OUTPUT_JSON" ]]; then
     OUTPUT_ARG=(--output-json "$OUTPUT_JSON")
 fi
 
-python intervene_validate_causal_structure.py \
+python "$WRODERI_REPO_ROOT/src/intervene_validate_causal_structure.py" \
     --model-name "$MODEL_NAME" \
     --experiment "$EXPERIMENT" \
     --graph-dir "$GRAPH_DIR" \
