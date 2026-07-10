@@ -45,9 +45,11 @@ from typing import Dict, List, Optional, Set, Tuple
 import sys
 
 REPO_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = REPO_ROOT.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from workspace_paths import resolve_auto_traces_root
 
